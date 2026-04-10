@@ -13,6 +13,7 @@
 2. Operator closes tab → collector stores 10-min snapshots
 3. Operator returns days later → sees historical graphs of all metrics
 4. Operator deploys to new node → config auto-detected from `user_config.yaml`
+5. Operator selects a time scale (1h | 1d | 1w | 1m | Max) → historical charts re-fetch and re-render for that window
 
 ## Tech Stack
 
@@ -216,6 +217,26 @@ All time-series data rendered as **line charts** using Chart.js. One chart per m
 | Peer count | Peer count | Time |
 | Wallet balances | Native token units | Time |
 
+### Time Scale Selector
+
+**Feature:** Time Scale Selector
+
+The user can choose the time window displayed in the historical charts.
+
+**Options:** `1h` | `1d` | `1w` | `1m` | `Max`
+- `1h` = last 1 hour
+- `1d` = last 24 hours (default)
+- `1w` = last 168 hours (7 days)
+- `1m` = last 720 hours (30 days)
+- `Max` = all available data (up to 90 days)
+
+**Implementation:**
+- A button group in the dashboard header (above the charts).
+- Default selection: `1d`.
+- On selection change, the charts re-fetch historical data via `GET /api/snapshots?hours=N` where N is 1, 24, 168, 720, or 0 (for Max, pass `hours=0` to return all available data).
+- Charts re-render with the new data window.
+- The live panel (5s refresh) is **unaffected** by the time scale — it always shows the latest snapshot data regardless of selected window.
+
 ## Testing Strategy
 
 **Collector tests (`tests/collector/`):**
@@ -259,6 +280,7 @@ All time-series data rendered as **line charts** using Chart.js. One chart per m
 - Hard-code wallet addresses
 - Expose private keys or signing keys
 - Commit `data/snapshots.db` (gitignored)
+- Change the time scale for the live panel (always shows latest snapshot)
 
 ## Success Criteria
 
@@ -274,6 +296,7 @@ All time-series data rendered as **line charts** using Chart.js. One chart per m
 - [ ] Malformed API responses are logged and treated as endpoint failures, not crashes
 - [ ] First run (0 snapshots): dashboard shows "Collecting data" banner and "—" for current values
 - [ ] Historical graphs display all available data up to 90 days; empty charts when no data
+- [ ] Time scale selector (1h | 1d | 1w | 1m | Max) filters historical chart data; default is 1d; live panel unaffected
 - [ ] Timestamps stored as UTC Unix epoch; rendered in browser's local timezone
 - [ ] Snapshot retention: 90 days — older rows pruned on startup and after each write
 - [ ] README has clear setup instructions for a new node operator
