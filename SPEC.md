@@ -118,16 +118,18 @@ wallets:
 ```sql
 CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp INTEGER NOT NULL,          -- Unix epoch (UTC)
-    chain_tip INTEGER NOT NULL,
-    lib INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL UNIQUE,  -- Unix epoch (UTC), truncated to 10-min window
+    chain_tip INTEGER,
+    lib TEXT,                            -- Last Irreversible Block hash (string)
+    mode TEXT,                           -- Node mode: "Bootstrapping", "Normal", etc.
     epoch INTEGER,
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
-    wallet_balances TEXT NOT NULL,       -- JSON: {"voucher": balance, "funding": balance}
-    UNIQUE(timestamp)                   -- One snapshot per 10-min interval
+    n_connections INTEGER DEFAULT 0,
+    wallet_balances TEXT NOT NULL       -- JSON: {"wallet_name": balance}
 );
-CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp);
 ```
 
 ## Snapshot and Data Logic

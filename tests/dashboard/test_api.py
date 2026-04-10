@@ -148,14 +148,14 @@ def test_history_returns_snapshots_since(client, fresh_db):
 
 
 def test_history_returns_all_when_since_0(client, fresh_db):
-    """/api/snapshots?since=0 returns all snapshots."""
+    """/api/snapshots?hours=0 returns all snapshots."""
     from dashboard.api import get_db_path
     db_path = get_db_path()
 
     _write(db_path, hours_ago=1, chain_tip=1000)
     _write(db_path, hours_ago=0, chain_tip=1010)
 
-    resp = client.get("/api/snapshots?since=0")
+    resp = client.get("/api/snapshots?hours=0")
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["count"] == 2
