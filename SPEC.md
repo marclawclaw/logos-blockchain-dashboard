@@ -6,6 +6,8 @@ Standalone read-only dashboard for Logos blockchain node operators. Shows node h
 
 **Repository:** `~/src/marclawclaw/logos-blockchain-dashboard`
 
+**Dashboard port:** `8282` (configurable)
+
 ## Architecture
 
 ```
@@ -80,15 +82,21 @@ logos-blockchain-dashboard/
 ## Config (`config.yaml`)
 
 ```yaml
+# Option 1: Auto-detect from node's user_config.yaml
+node_config_path: "~/.config/logos-node/user_config.yaml"
+
+# Option 2: Manual config (if not using node_config_path)
 node:
-  axum_url: "http://localhost:8080"  # Axum HTTP API
-  rpc_url: "http://localhost:8080"   # JSON-RPC endpoint
+  axum_url: "http://localhost:38437"  # Axum HTTP API (from api.backend.listen_address)
+  rpc_url: "http://localhost:38437"   # JSON-RPC endpoint (same server)
 
 wallets:
-  - name: "wallet_1"
-    address: "..."  # Base58 public address
-  - name: "wallet_2"
-    address: "..."  # Base58 public address
+  # Auto-extracted from wallet.known_keys in user_config.yaml
+  # Can also be specified manually:
+  - name: "voucher"
+    address: "e59ffc735020e875982dcf84906738224aae576ea9119714a6d1d44de96f6d16"
+  - name: "funding"
+    address: "d125ba0ff553f67726171fdd1c89941a07705c7cf1f43b5c8ba93e248a3c3507"
 
 collector:
   interval_minutes: 10
@@ -96,7 +104,7 @@ collector:
 
 dashboard:
   host: "0.0.0.0"
-  port: 8081
+  port: 8282
   refresh_seconds: 5
 ```
 
