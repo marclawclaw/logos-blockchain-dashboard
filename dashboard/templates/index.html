@@ -313,9 +313,9 @@ async function fetchLatest() {
   // Poll the Logos node APIs directly for live data
   try {
     const [infoRes, netRes, memRes] = await Promise.all([
-      fetch(/api/proxy/cryptarchia/info),
-      fetch(/api/proxy/network/info),
-      fetch(/api/proxy/mantle/metrics),
+      fetch("/api/proxy/cryptarchia/info"),
+      fetch("/api/proxy/network/info"),
+      fetch("/api/proxy/mantle/metrics"),
     ]);
 
     if (!infoRes.ok || !netRes.ok || !memRes.ok) throw new Error('Node API error');
