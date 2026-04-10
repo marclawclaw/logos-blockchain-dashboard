@@ -125,6 +125,7 @@ def test_sigterm_clean_stop_preserves_data(tmp_path, config_file, temp_db,
     # Use the wrapper script so fetch_all is pre-patched
     proc = subprocess.Popen(
         [sys.executable, wrapper_script,
+         "run",
          "--config", config_file,
          "--db", temp_db,
          "--daemon"],
@@ -177,6 +178,7 @@ def test_sigterm_shutdown_logs_clean_message(tmp_path, config_file, temp_db,
 
     proc = subprocess.Popen(
         [sys.executable, wrapper_script,
+         "run",
          "--config", config_file,
          "--db", temp_db],
         cwd=project_root,
@@ -248,6 +250,7 @@ def test_sigkill_db_remains_intact_after_hard_kill(tmp_path, config_file, temp_d
 
     proc = subprocess.Popen(
         [sys.executable, wrapper_script,
+         "run",
          "--config", config_file,
          "--db", temp_db],
         cwd=project_root,
@@ -318,6 +321,7 @@ def test_sigkill_pre_written_snapshot_survives(tmp_path, config_file, temp_db,
 
     proc = subprocess.Popen(
         [sys.executable, wrapper_script,
+         "run",
          "--config", config_file,
          "--db", temp_db],
         cwd=project_root,

@@ -34,6 +34,7 @@ _mm.fetch_all = _mock_fetch_all
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Logos Collector Test Wrapper")
+    parser.add_argument("subcommand", nargs="?", default="run", choices=["run"])
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--db", default="data/snapshots.db")
     parser.add_argument("--daemon", action="store_true")
