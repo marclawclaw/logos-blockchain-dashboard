@@ -1,0 +1,22 @@
+# Auto-detect wallets + API URL from node config
+node_config_path: "~/.config/logos-node/user_config.yaml"
+
+# Manual override (uncomment and fill if auto-detect is not available)
+# node:
+#   axum_url: "http://localhost:38437"
+
+# Wallet overrides (merge with or replace auto-detected wallets)
+# wallets:
+#   - name: "voucher"
+#     address: "e59ffc735020e875982dcf84906738224aae576ea9119714a6d1d44de96f6d16"
+#   - name: "funding"
+#     address: "d125ba0ff553f67726171fdd1c89941a07705c7cf1f43b5c8ba93e248a3c3507"
+
+collector:
+  interval_minutes: 10
+  database: "data/snapshots.db"
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8282
+  refresh_seconds: 5
