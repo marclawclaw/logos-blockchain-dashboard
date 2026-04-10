@@ -109,15 +109,6 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         logger.warning("All APIs failed — skipping snapshot for this interval")
         return
 
-    # Compute blocks_produced delta
-    latest = get_latest_snapshot(db_path)
-    prev_tip = latest["chain_tip"] if latest else None
-
-    if prev_tip is not None and result.chain_tip is not None:
-        blocks_produced = max(0, result.chain_tip - prev_tip)
-    else:
-        blocks_produced = 0
-
     # Truncate to 10-min window
     now = int(time.time())
     timestamp = (now // 600) * 600
@@ -129,7 +120,6 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         lib=result.lib,
         mode=result.mode,
         epoch=result.epoch,
-        blocks_produced=blocks_produced,
         mempool_depth=result.mempool_depth,
         peer_count=result.peer_count,
         n_connections=result.n_connections,

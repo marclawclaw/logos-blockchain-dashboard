@@ -150,7 +150,6 @@
     <div class="metric"><span class="metric-label">Tip Height</span><span class="metric-value" id="chain-tip">—</span></div>
     <div class="metric"><span class="metric-label">Slot</span><span class="metric-value" id="chain-slot">—</span></div>
     <div class="metric"><span class="metric-label">Mode</span><span class="metric-value" id="chain-mode">—</span></div>
-    <div class="metric"><span class="metric-label">Blocks/interval</span><span class="metric-value" id="blocks-produced">—</span></div>
   </div>
 
   <!-- Mempool -->
@@ -185,10 +184,6 @@
     <div class="chart-wrap"><canvas id="chart-tip"></canvas></div>
   </div>
 
-  <div class="card chart-card">
-    <div class="card-title">Blocks Produced / Interval</div>
-    <div class="chart-wrap"><canvas id="chart-blocks"></canvas></div>
-  </div>
 
   <div class="card chart-card">
     <div class="card-title">Mempool Depth</div>
@@ -335,7 +330,6 @@ async function fetchLatest() {
       peer_count: net.n_peers,
       n_connections: net.n_connections,
       mempool_depth: mem.pending_items,
-      blocks_produced: null,  // live API doesn't provide delta
     };
   } catch (e) {
     return null;
@@ -402,7 +396,6 @@ function renderSnapshot(snap) {
   setVal(document.getElementById('chain-tip'), snap.chain_tip);
   setVal(document.getElementById('chain-slot'), snap.epoch);
   setVal(document.getElementById('chain-mode'), snap.mode || '—');
-  setVal(document.getElementById('blocks-produced'), snap.blocks_produced);
 
   // Mempool
   setVal(document.getElementById('mempool-depth'), snap.mempool_depth);
@@ -463,7 +456,6 @@ function updateHistory(data) {
   for (const snap of snaps) {
     const ts = snap.timestamp;
     if (charts.tip) pushPoint(charts.tip, ts, snap.chain_tip);
-    if (charts.blocks) pushPoint(charts.blocks, ts, snap.blocks_produced);
     if (charts.mempool) pushPoint(charts.mempool, ts, snap.mempool_depth);
     if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
     let balances = {};
@@ -521,7 +513,6 @@ async function init() {
   });
 
   charts.tip = makeChart('chart-tip', 'Chain Tip', '#58a6ff');
-  charts.blocks = makeChart('chart-blocks', 'Blocks/Interval', '#3fb950');
   charts.mempool = makeChart('chart-mempool', 'Pending Tx', '#d29922');
   charts.peers = makeChart('chart-peers', 'Peers', '#bc8cff');
 

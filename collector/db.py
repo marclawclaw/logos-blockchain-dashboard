@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +21,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
     lib TEXT,                            -- Last Irreversible Block hash (string)
     mode TEXT,                           -- Node mode: "Bootstrapping", "Normal", etc.
     epoch INTEGER,
-    blocks_produced INTEGER DEFAULT 0,
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
     n_connections INTEGER DEFAULT 0,
-    wallet_balances TEXT NOT NULL  -- JSON: {"wallet_name": balance}
+    wallet_balances TEXT NOT NULL       -- JSON: {"wallet_name": balance}
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp);
@@ -57,7 +55,6 @@ def write_snapshot(
     lib: Optional[str],
     mode: Optional[str],
     epoch: Optional[int],
-    blocks_produced: int,
     mempool_depth: int,
     peer_count: int,
     n_connections: int,
@@ -72,10 +69,10 @@ def write_snapshot(
     conn.execute(
         """
         INSERT OR REPLACE INTO snapshots
-            (timestamp, chain_tip, lib, mode, epoch, blocks_produced, mempool_depth, peer_count, n_connections, wallet_balances)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, wallet_balances)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (timestamp, chain_tip, lib, mode, epoch, blocks_produced, mempool_depth, peer_count, n_connections, wallet_json),
+        (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, wallet_json),
     )
     conn.commit()
     conn.close()
