@@ -169,10 +169,12 @@ CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 - [ ] Config auto-detects API URL and wallet addresses from `user_config.yaml`
 - [ ] Collector logs errors without crashing when an API is temporarily unavailable
 - [ ] README has clear setup instructions for a new node operator
+- [ ] Snapshot retention: 90 days (older rows pruned on startup)
 
 ## Open Questions
 
-1. Should the collector also poll Sequencer RPC (`get_last_block`) or is `/cryptarchia/info` sufficient for chain tip?
+1. ~~Should the collector also poll Sequencer RPC (`get_last_block`) or is `/cryptarchia/info` sufficient for chain tip?~~ — Assumed: `/cryptarchia/info` sufficient
 2. Chart types: line graphs for all time-series data, or are there specific preferences?
-3. Retention policy: 30 days OK, or should it be configurable?
+3. ~~Retention policy~~ — Confirmed: 90 days
 4. Docker: is this a hard MVP requirement or post-MVP?
+5. ~~Which wallets to monitor?~~ — Assumed: both from `wallet.known_keys` (voucher + funding)
