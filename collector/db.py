@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL UNIQUE,  -- Unix epoch (UTC), truncated to 10-min window
     chain_tip INTEGER,
-    lib INTEGER,
+    lib TEXT,                            -- Last Irreversible Block hash (string)
+    mode TEXT,                           -- Node mode: "Bootstrapping", "Normal", etc.
     epoch INTEGER,
     blocks_produced INTEGER DEFAULT 0,
     mempool_depth INTEGER DEFAULT 0,
@@ -52,7 +53,8 @@ def write_snapshot(
     db_path: str,
     timestamp: int,
     chain_tip: Optional[int],
-    lib: Optional[int],
+    lib: Optional[str],
+    mode: Optional[str],
     epoch: Optional[int],
     blocks_produced: int,
     mempool_depth: int,
@@ -68,10 +70,10 @@ def write_snapshot(
     conn.execute(
         """
         INSERT OR REPLACE INTO snapshots
-            (timestamp, chain_tip, lib, epoch, blocks_produced, mempool_depth, peer_count, wallet_balances)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, chain_tip, lib, mode, epoch, blocks_produced, mempool_depth, peer_count, wallet_balances)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (timestamp, chain_tip, lib, epoch, blocks_produced, mempool_depth, peer_count, wallet_json),
+        (timestamp, chain_tip, lib, mode, epoch, blocks_produced, mempool_depth, peer_count, wallet_json),
     )
     conn.commit()
     conn.close()

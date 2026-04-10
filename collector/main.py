@@ -116,6 +116,7 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         timestamp=timestamp,
         chain_tip=result.chain_tip,
         lib=result.lib,
+        mode=result.mode,
         epoch=result.epoch,
         blocks_produced=blocks_produced,
         mempool_depth=result.mempool_depth,

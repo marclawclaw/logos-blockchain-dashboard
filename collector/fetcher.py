@@ -47,7 +47,8 @@ class FetchResult:
     """All metrics fetched in one interval."""
 
     chain_tip: Optional[int] = None
-    lib: Optional[int] = None
+    lib: Optional[str] = None  # hash string, not numeric
+    mode: Optional[str] = None  # "Bootstrapping", "Normal", etc.
     epoch: Optional[int] = None
     mempool_depth: int = 0
     peer_count: int = 0
@@ -195,7 +196,8 @@ def fetch_all(base_url: str, wallet_names: list[tuple[str, str]]) -> FetchResult
     info = fetch_cryptarchia_info(base_url)
     if info:
         result.chain_tip = info.height
-        result.lib = None  # lib is a hash, not a height — skip for numeric tracking
+        result.lib = info.lib  # hash string
+        result.mode = info.mode
         result.epoch = info.slot  # slot is close enough to epoch for now
 
     net = fetch_network_info(base_url)
