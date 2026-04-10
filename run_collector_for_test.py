@@ -11,25 +11,26 @@ import logging
 import sys
 from pathlib import Path
 
-# Patch fetch_all BEFORE importing collector modules
-class _MockResult:
-    chain_tip = 99999
-    lib = "test_lib_hash"
-    mode = "Normal"
-    epoch = 1
-    mempool_depth = 7
-    peer_count = 13
-    n_connections = 5
-    wallet_balances = {"test_wallet": 111111}
+def _apply_fetch_all_patch() -> None:
+    """Apply the fetch_all mock. Safe to call multiple times."""
+    class _MockResult:
+        chain_tip = 99999
+        lib = "test_lib_hash"
+        mode = "Normal"
+        epoch = 1
+        mempool_depth = 7
+        peer_count = 13
+        n_connections = 5
+        wallet_balances = {"test_wallet": 111111}
 
-def _mock_fetch_all(url, wallets):
-    return _MockResult()
+    def _mock_fetch_all(url, wallets):
+        return _MockResult()
 
-import collector.fetcher as _fm
-_fm.fetch_all = _mock_fetch_all
+    import collector.fetcher as _fm
+    _fm.fetch_all = _mock_fetch_all
 
-import collector.main as _mm
-_mm.fetch_all = _mock_fetch_all
+    import collector.main as _mm
+    _mm.fetch_all = _mock_fetch_all
 
 
 def main() -> None:
@@ -53,4 +54,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _apply_fetch_all_patch()
     main()
