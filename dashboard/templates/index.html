@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logos Node Observer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --amber: #d29922;
+      --red: #f85149;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: var(--text); }
+    #status {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+    }
+    #status-dot.stale { background: var(--amber); }
+    #status-dot.error { background: var(--red); }
+
+    /* Banner */
+    #banner {
+      display: none;
+      padding: 10px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+      font-size: 13px;
+      color: var(--amber);
+    }
+    #banner.error { color: var(--red); border-color: var(--red); }
+    #banner.info { color: var(--accent); }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      padding: 16px 24px;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    /* Metric row */
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 4px 0;
+    }
+    .metric-label { color: var(--muted); font-size: 13px; }
+    .metric-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .metric-value.unknown { color: var(--muted); font-style: italic; }
+
+    /* Charts */
+    .chart-card { grid-column: 1 / -1; }
+    .chart-wrap { position: relative; height: 160px; }
+    @media (min-width: 900px) {
+      .chart-wrap { height: 200px; }
+    }
+
+    /* Wallet cards */
+    .wallet-balance {
+      font-size: 24px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+    }
+    .wallet-name { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+
+    /* Footer */
+    footer {
+      padding: 12px 24px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Refresh indicator */
+    #refresh-info { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🟢 Logos Node Observer</h1>
+  <div id="status">
+    <span id="status-dot"></span>
+    <span id="status-text">Connecting...</span>
+  </div>
+</header>
+
+<div id="banner"></div>
+
+<div class="grid">
+
+  <!-- Chain Overview -->
+  <div class="card">
+    <div class="card-title">Chain</div>
+    <div class="metric"><span class="metric-label">Tip Height</span><span class="metric-value" id="chain-tip">—</span></div>
+    <div class="metric"><span class="metric-label">Slot</span><span class="metric-value" id="chain-slot">—</span></div>
+    <div class="metric"><span class="metric-label">Mode</span><span class="metric-value" id="chain-mode">—</span></div>
+    <div class="metric"><span class="metric-label">Blocks/interval</span><span class="metric-value" id="blocks-produced">—</span></div>
+  </div>
+
+  <!-- Mempool -->
+  <div class="card">
+    <div class="card-title">Mempool</div>
+    <div class="metric"><span class="metric-label">Pending Tx</span><span class="metric-value" id="mempool-depth">—</span></div>
+    <div class="metric"><span class="metric-label">Last Item Age</span><span class="metric-value" id="mempool-age">—</span></div>
+  </div>
+
+  <!-- Network -->
+  <div class="card">
+    <div class="card-title">Network</div>
+    <div class="metric"><span class="metric-label">Peers</span><span class="metric-value" id="peer-count">—</span></div>
+    <div class="metric"><span class="metric-label">Connections</span><span class="metric-value" id="connections">—</span></div>
+  </div>
+
+  <!-- Wallets -->
+  <div class="card">
+    <div class="card-title">Voucher Wallet</div>
+    <div class="wallet-name">voucher</div>
+    <div class="wallet-balance" id="wallet-voucher">—</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Funding Wallet</div>
+    <div class="wallet-name">funding</div>
+    <div class="wallet-balance" id="wallet-funding">—</div>
+  </div>
+
+  <!-- Charts -->
+  <div class="card chart-card">
+    <div class="card-title">Chain Tip Height</div>
+    <div class="chart-wrap"><canvas id="chart-tip"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Blocks Produced / Interval</div>
+    <div class="chart-wrap"><canvas id="chart-blocks"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Mempool Depth</div>
+    <div class="chart-wrap"><canvas id="chart-mempool"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Peer Count</div>
+    <div class="chart-wrap"><canvas id="chart-peers"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Wallet Balances</div>
+    <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
+  </div>
+
+</div>
+
+<footer>
+  <span id="refresh-info">Last updated: never</span>
+  <span id="snapshot-count">0 snapshots</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
+let charts = {};
+let lastSnapshot = null;
+let refreshInterval = null;
+const REFRESH_MS = 5000;          // 5 seconds when page is visible
+const API_BASE = '/api';
+const HOURS = 72;                 // Historical window for charts
+
+// ─────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────
+function localTime(epochMs) {
+  if (!epochMs) return '—';
+  return new Date(epochMs * 1000).toLocaleTimeString();
+}
+
+function setUnknown(el, text) {
+  el.textContent = text ?? '—';
+  el.classList.toggle('unknown', true);
+}
+
+function setVal(el, val) {
+  el.textContent = val ?? '—';
+  el.classList.toggle('unknown', !val && val !== 0);
+}
+
+function showBanner(msg, cls) {
+  const b = document.getElementById('banner');
+  b.textContent = msg;
+  b.className = cls;
+  b.style.display = 'block';
+}
+
+function hideBanner() {
+  document.getElementById('banner').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────────
+// Charts
+// ─────────────────────────────────────────────────────────────
+function makeChart(id, label, color) {
+  const ctx = document.getElementById(id).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label,
+        data: [],
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.2,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          grid: { color: '#30363d' },
+          ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true },
+        },
+        y: {
+          grid: { color: '#30363d' },
+          ticks: { color: '#8b949e' },
+        },
+      },
+    },
+  });
+}
+
+function pushPoint(chart, timestamp, value) {
+  chart.data.labels.push(localTime(timestamp));
+  chart.data.datasets[0].data.push(value);
+  if (chart.data.labels.length > 200) {
+    chart.data.labels.shift();
+    chart.data.datasets[0].data.shift();
+  }
+  chart.update('none');
+}
+
+// ─────────────────────────────────────────────────────────────
+// API
+// ─────────────────────────────────────────────────────────────
+async function fetchLatest() {
+  try {
+    const r = await fetch(`${API_BASE}/snapshot/latest`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchHistory() {
+  try {
+    const r = await fetch(`${API_BASE}/snapshots?hours=${HOURS}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    return { snapshots: [] };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Update UI
+// ─────────────────────────────────────────────────────────────
+function updateLatest(snap) {
+  if (!snap) {
+    showBanner('Node unreachable — cannot connect to APIs. Check node status and config.', 'error');
+    return;
+  }
+  hideBanner();
+
+  const ts = snap._ts ?? snap.timestamp;
+
+  // Chain
+  setVal(document.getElementById('chain-tip'), snap.chain_tip);
+  setVal(document.getElementById('chain-slot'), snap.epoch);
+  setVal(document.getElementById('chain-mode'), snap.mode || '—');
+  setVal(document.getElementById('blocks-produced'), snap.blocks_produced);
+
+  // Mempool
+  setVal(document.getElementById('mempool-depth'), snap.mempool_depth);
+  const ageEl = document.getElementById('mempool-age');
+  if (snap.mempool_age_ms != null) {
+    const secs = Math.floor((Date.now() / 1000 - ts * 1000) / 1000);
+    ageEl.textContent = secs < 60 ? `${secs}s ago` : `${Math.floor(secs/60)}m ago`;
+  } else {
+    setUnknown(ageEl);
+  }
+
+  // Network
+  setVal(document.getElementById('peer-count'), snap.peer_count);
+  setVal(document.getElementById('connections'), snap.n_connections || '—');
+
+  // Wallet balances
+  let balances = {};
+  try {
+    balances = JSON.parse(snap.wallet_balances || '{}');
+  } catch (_) {}
+
+  for (const [name, val] of Object.entries(balances)) {
+    const el = document.getElementById(`wallet-${name}`);
+    if (el) setVal(el, val != null ? Number(val).toLocaleString() : '—');
+  }
+
+  // Push to charts
+  if (charts.tip) pushPoint(charts.tip, ts, snap.chain_tip);
+  if (charts.blocks) pushPoint(charts.blocks, ts, snap.blocks_produced);
+  if (charts.mempool) pushPoint(charts.mempool, ts, snap.mempool_depth);
+  if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
+
+  // Wallet chart
+  if (charts.wallets) {
+    for (const [name, val] of Object.entries(balances)) {
+      const ds = charts.wallets.data.datasets.find(d => d.label === name);
+      if (ds) pushPoint(charts.wallets, ts, val);
+    }
+  }
+
+  // Status
+  const age = Date.now() / 1000 - ts;
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  dot.className = age > 300 ? 'stale' : '';
+  txt.textContent = age > 300 ? `Stale (${Math.floor(age/60)}m old)` : 'Live';
+
+  document.getElementById('refresh-info').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+}
+
+function updateHistory(data) {
+  const snaps = data.snapshots || [];
+  document.getElementById('snapshot-count').textContent = `${snaps.length} snapshots`;
+
+  if (snaps.length === 0) {
+    showBanner('Collecting data — first snapshot in approximately 10 minutes', 'info');
+    return;
+  }
+
+  if (snaps.length < 6) {
+    showBanner(`Very little data — graphs become meaningful after a few hours (${snaps.length} snapshot${snaps.length===1?'':'s'} available)`, 'info');
+  } else {
+    hideBanner();
+  }
+
+  // Seed charts with history
+  for (const snap of snaps) {
+    const ts = snap.timestamp;
+    if (charts.tip) pushPoint(charts.tip, ts, snap.chain_tip);
+    if (charts.blocks) pushPoint(charts.blocks, ts, snap.blocks_produced);
+    if (charts.mempool) pushPoint(charts.mempool, ts, snap.mempool_depth);
+    if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
+    let balances = {};
+    try { balances = JSON.parse(snap.wallet_balances || '{}'); } catch (_) {}
+    for (const [name, val] of Object.entries(balances)) {
+      const ds = charts.wallets?.data?.datasets?.find(d => d.label === name);
+      if (ds) pushPoint(charts.wallets, ts, val);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Refresh logic
+// ─────────────────────────────────────────────────────────────
+async function refresh() {
+  const snap = await fetchLatest();
+  updateLatest(snap);
+}
+
+// Page visible -> 5s polling; hidden -> stop
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      refreshInterval = null;
+    }
+  } else {
+    refresh();
+    refreshInterval = setInterval(refresh, REFRESH_MS);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────────────
+async function init() {
+  // Seed wallet chart with one dataset per known wallet
+  const walletNames = ['voucher', 'funding'];
+  const walletColors = ['#58a6ff', '#3fb950'];
+  charts.wallets = new Chart(document.getElementById('chart-wallets').getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: walletNames.map((name, i) => ({
+      label: name, data: [], borderColor: walletColors[i],
+      backgroundColor: walletColors[i] + '22', borderWidth: 1.5,
+      pointRadius: 0, tension: 0.2, fill: false,
+    })) },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
+      scales: {
+        x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
+        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+      },
+    },
+  });
+
+  charts.tip = makeChart('chart-tip', 'Chain Tip', '#58a6ff');
+  charts.blocks = makeChart('chart-blocks', 'Blocks/Interval', '#3fb950');
+  charts.mempool = makeChart('chart-mempool', 'Pending Tx', '#d29922');
+  charts.peers = makeChart('chart-peers', 'Peers', '#bc8cff');
+
+  // Load history first, then start polling
+  const hist = await fetchHistory();
+  updateHistory(hist);
+  const snap = await fetchLatest();
+  updateLatest(snap);
+
+  if (!document.hidden) {
+    refreshInterval = setInterval(refresh, REFRESH_MS);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
