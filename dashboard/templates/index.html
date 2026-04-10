@@ -166,6 +166,13 @@
     <div class="metric"><span class="metric-label">Connections</span><span class="metric-value" id="connections">—</span></div>
   </div>
 
+  <!-- Block Producer -->
+  <div class="card">
+    <div class="card-title">Block Producer</div>
+    <div class="metric"><span class="metric-label">Current Leader</span><span class="metric-value" id="block-producer">—</span></div>
+    <div class="metric"><span class="metric-label">Key (truncated)</span><span class="metric-value" id="block-producer-short" style="font-size:11px">—</span></div>
+  </div>
+
   <!-- Wallets -->
   <div class="card">
     <div class="card-title">Voucher Wallet</div>
@@ -198,6 +205,11 @@
   <div class="card chart-card">
     <div class="card-title">Wallet Balances</div>
     <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Block Producer Distribution</div>
+    <div class="chart-wrap"><canvas id="chart-producers"></canvas></div>
   </div>
 
 </div>
@@ -411,6 +423,11 @@ function renderSnapshot(snap) {
   setVal(document.getElementById('peer-count'), snap.peer_count);
   setVal(document.getElementById('connections'), snap.n_connections || '—');
 
+  // Block producer
+  const bp = snap.block_producer;
+  setVal(document.getElementById('block-producer'), bp || '—');
+  setVal(document.getElementById('block-producer-short'), bp ? bp.slice(0, 16) + '...' : '—');
+
   // Wallet balances
   let balances = {};
   try {
@@ -495,6 +512,19 @@ async function init() {
   // Seed wallet chart with one dataset per known wallet
   const walletNames = ['voucher', 'funding'];
   const walletColors = ['#58a6ff', '#3fb950'];
+  charts.producers = new Chart(document.getElementById('chart-producers').getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
+      scales: {
+        x: { stacked: true, grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
+        y: { stacked: true, grid: { color: '#30363d' }, ticks: { color: '#8b949e' }, beginAtZero: true },
+      },
+    },
+  });
+
   charts.wallets = new Chart(document.getElementById('chart-wallets').getContext('2d'), {
     type: 'line',
     data: { labels: [], datasets: walletNames.map((name, i) => ({

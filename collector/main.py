@@ -123,6 +123,7 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         mempool_depth=result.mempool_depth,
         peer_count=result.peer_count,
         n_connections=result.n_connections,
+        block_producer=result.block_producer,
         wallet_balances=result.wallet_balances,
     )
 

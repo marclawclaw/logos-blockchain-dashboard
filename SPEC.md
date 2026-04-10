@@ -120,12 +120,15 @@ CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp INTEGER NOT NULL,          -- Unix epoch (UTC)
     chain_tip INTEGER NOT NULL,
-    lib INTEGER NOT NULL,
+    lib TEXT NOT NULL,                   -- Last Irreversible Block hash (string)
+    mode TEXT,                           -- Node mode: "Bootstrapping", "Normal", etc.
     epoch INTEGER,
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
-    wallet_balances TEXT NOT NULL,       -- JSON: {"voucher": balance, "funding": balance}
-    UNIQUE(timestamp)                   -- One snapshot per 10-min interval
+    n_connections INTEGER DEFAULT 0,
+    block_producer TEXT,                  -- Public key of the most recent block's producer
+    wallet_balances TEXT NOT NULL,        -- JSON: {"voucher": balance, "funding": balance}
+    UNIQUE(timestamp)                    -- One snapshot per 10-min interval
 );
 CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 ```
@@ -205,6 +208,7 @@ All time-series data rendered as **line charts** using Chart.js. One chart per m
 | LIB height | Block height | Time |
 | Mempool depth | Tx count | Time |
 | Peer count | Peer count | Time |
+| Block producer | Count per leader | Time (stacked bar) |
 | Wallet balances | Native token units | Time |
 
 ### Time Scale Selector
@@ -277,7 +281,7 @@ The user can choose the time window displayed in the historical charts.
 - [ ] `python -m collector run` polls all APIs and stores a snapshot every 10 min (aligned to 10-min boundary)
 - [ ] `python -m collector run --daemon` survives restart; duplicate 10-min windows use `INSERT OR REPLACE`
 - [ ] `python -m dashboard` serves dashboard on port 8282
-- [ ] Dashboard shows: chain tip, LIB, epoch, mempool depth, peer count, wallet balances
+- [ ] Dashboard shows: chain tip, LIB, epoch, mempool depth, peer count, wallet balances, block producer
 - [ ] Dashboard auto-refreshes every 5s when tab is visible, stops when hidden
 - [ ] Config auto-detects API URL from `api.backend.listen_address` in `user_config.yaml`
 - [ ] Config auto-detects wallet addresses from `wallet.known_keys` in `user_config.yaml`

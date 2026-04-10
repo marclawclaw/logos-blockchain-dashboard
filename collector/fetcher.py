@@ -53,6 +53,7 @@ class FetchResult:
     mempool_depth: int = 0
     peer_count: int = 0
     n_connections: int = 0
+    block_producer: Optional[str] = None  # Public key of most recent block's producer
     wallet_balances: dict[str, Optional[int]] = None  # {name: balance}
 
     def __post_init__(self):
@@ -177,6 +178,35 @@ def fetch_wallet_balance(base_url: str, name: str, address: str) -> Optional[int
 
 
 # ---------------------------------------------------------------------------
+
+def fetch_latest_block(base_url: str, slot: int) -> Optional[str]:
+    """Fetch the block producer (leader key) for a given slot.
+
+    Returns the leader's public key as a hex string, or None on failure.
+    The Logos block structure: Block.header.proof_of_leadership.leader_key
+    """
+    url = f"{base_url.rstrip('/')}/cryptarchia/blocks?slot_from={slot}&to_slot={slot}"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 400:
+            return None
+        resp.raise_for_status()
+        blocks = resp.json()
+        if not blocks or not isinstance(blocks, list) or len(blocks) == 0:
+            return None
+        block = blocks[0]
+        # Navigate: header -> proof_of_leadership -> leader_key
+        header = block.get("header") or block.get("Header")
+        if not header:
+            # Try raw block if header not present
+            return None
+        leader_proof = header.get("proof_of_leadership") or header.get("leader_proof") or {}
+        return leader_proof.get("leader_key") or leader_proof.get("leaderPublicKey")
+    except (requests.RequestException, ValueError, TypeError) as e:
+        logger.warning("GET %s failed: %s", url, e)
+        return None
+
+
 # Combined fetch
 # ---------------------------------------------------------------------------
 
@@ -205,6 +235,10 @@ def fetch_all(base_url: str, wallet_names: list[tuple[str, str]]) -> FetchResult
     if net:
         result.peer_count = net.n_peers
         result.n_connections = net.n_connections
+
+    # Fetch block producer from the most recent block
+    if result.epoch:
+        result.block_producer = fetch_latest_block(base_url, result.epoch)
 
     mempool = fetch_mempool_metrics(base_url)
     if mempool:
