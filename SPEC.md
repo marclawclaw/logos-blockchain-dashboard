@@ -122,7 +122,6 @@ CREATE TABLE snapshots (
     chain_tip INTEGER NOT NULL,
     lib INTEGER NOT NULL,
     epoch INTEGER,
-    blocks_produced INTEGER DEFAULT 0,   -- Delta since last snapshot
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
     wallet_balances TEXT NOT NULL,       -- JSON: {"voucher": balance, "funding": balance}
@@ -132,14 +131,6 @@ CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 ```
 
 ## Snapshot and Data Logic
-
-**Delta calculation (`blocks_produced`):**
-```python
-def compute_blocks_produced(current_tip: int, previous_tip: int | None) -> int:
-    if previous_tip is None:
-        return 0  # First snapshot ever
-    return max(0, current_tip - previous_tip)
-```
 
 **Timestamp:** Unix epoch integer (UTC). The 10-minute window aligns to `now // 600 * 600` (truncated to nearest 10 min).
 
@@ -212,7 +203,6 @@ All time-series data rendered as **line charts** using Chart.js. One chart per m
 |--------|--------|--------|
 | Chain tip height | Block height | Time |
 | LIB height | Block height | Time |
-| Blocks produced (per interval) | Count | Time |
 | Mempool depth | Tx count | Time |
 | Peer count | Peer count | Time |
 | Wallet balances | Native token units | Time |
@@ -245,7 +235,6 @@ The user can choose the time window displayed in the historical charts.
 - Test config parsing: yaml auto-detect + manual override
 - Test retention pruning (rows older than 90 days deleted on startup)
 - Test malformed response handling (bad JSON, null fields)
-- Test `blocks_produced` delta calculation including first-snapshot edge case
 
 **Dashboard API tests (`tests/dashboard/`):**
 - Mock SQLite responses
