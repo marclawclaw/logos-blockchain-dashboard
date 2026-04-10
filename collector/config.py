@@ -11,6 +11,29 @@ from typing import Optional
 import yaml
 
 
+# Custom YAML loader that handles the !Ed25519 tag used in Logos node config files.
+# Without this, yaml.safe_load and yaml.unsafe_load both fail on unknown tags.
+def _logos_loader():
+    """Construct a YAML loader that accepts unknown tags as plain strings."""
+    loader = yaml.SafeLoader
+    
+    def _construct_undefined(loader, node):
+        # For unknown tags, return the scalar value as a string
+        if isinstance(node, yaml.ScalarNode):
+            return loader.construct_scalar(node)
+        elif isinstance(node, yaml.SequenceNode):
+            return loader.construct_sequence(node)
+        elif isinstance(node, yaml.MappingNode):
+            return loader.construct_mapping(node)
+        return None
+    
+    loader.add_constructor(None, _construct_undefined)
+    return loader
+
+
+_yaml_loader = _logos_loader()
+
+
 class ConfigError(Exception):
     """Raised when config is invalid or missing required fields."""
 
@@ -69,7 +92,7 @@ def load(config_path: Optional[str] = None) -> Config:
 
     if node_config_file.exists():
         with open(node_config_file) as f:
-            node_raw = yaml.safe_load(f) or {}
+            node_raw = yaml.load(f, Loader=_yaml_loader) or {}
 
         # Extract API URL from api.backend.listen_address
         listen_addr = node_raw.get("api", {}).get("backend", {}).get("listen_address", "")

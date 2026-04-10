@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from flask import Blueprint, jsonify, request
 
@@ -19,14 +18,23 @@ api = Blueprint("api", __name__, url_prefix="/api")
 
 
 def get_db_path() -> str:
-    """Return the configured database path, defaulting to data/snapshots.db."""
-    # Import here to avoid circular imports at module level
+    """Return the configured database path as an absolute path.
+    
+    Resolves relative to the project root (parent of this file's parent)
+    to work regardless of the current working directory.
+    """
     from collector.config import load
     try:
         cfg = load()
-        return cfg.database
+        db = cfg.database
     except Exception:
-        return os.environ.get("DASHBOARD_DB", "data/snapshots.db")
+        db = "data/snapshots.db"
+    
+    # Make absolute relative to project root (parent of dashboard/)
+    if not os.path.isabs(db):
+        project_root = Path(__file__).parent.parent
+        db = str(project_root / db)
+    return db
 
 
 @api.route("/snapshot/latest", methods=["GET"])
