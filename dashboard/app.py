@@ -31,7 +31,14 @@ def create_app() -> Flask:
 
     @app.route("/")
     def index():
-        return render_template("index.html")
+        # Pass the Logos node API URL to the frontend so it can poll live data
+        try:
+            from collector.config import load
+            cfg = load()
+            node_url = cfg.axum_url
+        except Exception:
+            node_url = "http://localhost:38437"
+        return render_template("index.html", node_url=node_url)
 
     return app
 

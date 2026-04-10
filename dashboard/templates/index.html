@@ -221,7 +221,8 @@ let lastSnapshot = null;
 let refreshInterval = null;
 const REFRESH_MS = 5000;          // 5 seconds when page is visible
 const API_BASE = '/api';
-const HOURS = 72;                 // Historical window for charts
+const NODE_URL = '{{ node_url }}';  // Logos node API (from server-side config)
+const HOURS = 72;                   // Historical window for charts
 
 // ─────────────────────────────────────────────────────────────
 // Utilities
@@ -308,10 +309,31 @@ function pushPoint(chart, timestamp, value) {
 // API
 // ─────────────────────────────────────────────────────────────
 async function fetchLatest() {
+  // Poll the Logos node APIs directly for live data
   try {
-    const r = await fetch(`${API_BASE}/snapshot/latest`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
+    const [infoRes, netRes, memRes] = await Promise.all([
+      fetch(`${NODE_URL}/cryptarchia/info`),
+      fetch(`${NODE_URL}/network/info`),
+      fetch(`${NODE_URL}/mantle/metrics`),
+    ]);
+
+    if (!infoRes.ok || !netRes.ok || !memRes.ok) throw new Error('Node API error');
+
+    const info = await infoRes.json();
+    const net = await netRes.json();
+    const mem = await memRes.json();
+
+    return {
+      _ts: Math.floor(Date.now() / 1000),
+      chain_tip: info.height,
+      mode: info.mode,
+      epoch: info.slot,
+      lib: info.lib,
+      peer_count: net.n_peers,
+      n_connections: net.n_connections,
+      mempool_depth: mem.pending_items,
+      blocks_produced: null,  // live API doesn't provide delta
+    };
   } catch (e) {
     return null;
   }
