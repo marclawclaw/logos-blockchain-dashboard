@@ -52,6 +52,7 @@ class FetchResult:
     epoch: Optional[int] = None
     mempool_depth: int = 0
     peer_count: int = 0
+    n_connections: int = 0
     wallet_balances: dict[str, Optional[int]] = None  # {name: balance}
 
     def __post_init__(self):
@@ -203,6 +204,7 @@ def fetch_all(base_url: str, wallet_names: list[tuple[str, str]]) -> FetchResult
     net = fetch_network_info(base_url)
     if net:
         result.peer_count = net.n_peers
+        result.n_connections = net.n_connections
 
     mempool = fetch_mempool_metrics(base_url)
     if mempool:
