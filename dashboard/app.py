@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,12 @@ def create_app() -> Flask:
     @app.route("/")
     def index():
         return render_template("index.html")
+
+    @app.route("/static/refresh.js")
+    def refresh_js():
+        """Serve the visibility polling module as an ES module from the static dir."""
+        return send_from_directory(Path(__file__).parent / "static", "refresh.js",
+                                   mimetype="application/javascript")
 
     return app
 
