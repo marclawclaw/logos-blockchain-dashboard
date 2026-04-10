@@ -292,6 +292,8 @@ function makeChart(id, label, color) {
 }
 
 function pushPoint(chart, timestamp, value) {
+  // Skip if this timestamp already exists (avoids duplicate labels from init race)
+  if (chart.data.labels.includes(localTime(timestamp))) return;
   chart.data.labels.push(localTime(timestamp));
   chart.data.datasets[0].data.push(value);
   if (chart.data.labels.length > 200) {
