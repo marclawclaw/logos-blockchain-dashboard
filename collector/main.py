@@ -94,9 +94,20 @@ def _run(config: Config, db_path: str, daemon: bool = False) -> None:
 
 
 def _collect_and_store(config: Config, db_path: str) -> None:
-    """Fetch metrics, compute delta, and write snapshot."""
+    """Fetch metrics, compute delta, and write snapshot.
+
+    If all API endpoints fail (chain_tip is None), the snapshot is skipped entirely
+    per the spec. This means:
+    - First run, all APIs fail -> no snapshot written, no error banner shown yet
+    - Subsequent runs, all APIs fail -> snapshot skipped, dashboard shows last known values
+    """
     wallet_tuples = [(w.name, w.address) for w in config.wallets]
     result = fetch_all(config.axum_url, wallet_tuples)
+
+    # If all APIs failed, skip this interval entirely
+    if result.chain_tip is None:
+        logger.warning("All APIs failed — skipping snapshot for this interval")
+        return
 
     # Compute blocks_produced delta
     latest = get_latest_snapshot(db_path)
