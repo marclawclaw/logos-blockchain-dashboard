@@ -222,7 +222,7 @@ let refreshInterval = null;
 let lastLiveFetch = null;           // Unix timestamp of last successful node-API fetch
 const REFRESH_MS = 5000;            // 5 seconds when page is visible
 const API_BASE = '/api';
-const NODE_URL = '{{ node_url }}';   // Logos node API (from server-side config)
+// Logos node API proxied via Flask (avoids CORS) (from server-side config)
 const HOURS = 72;                   // Historical window for charts
 
 // ─────────────────────────────────────────────────────────────
@@ -313,9 +313,9 @@ async function fetchLatest() {
   // Poll the Logos node APIs directly for live data
   try {
     const [infoRes, netRes, memRes] = await Promise.all([
-      fetch(`${NODE_URL}/cryptarchia/info`),
-      fetch(`${NODE_URL}/network/info`),
-      fetch(`${NODE_URL}/mantle/metrics`),
+      fetch(/api/proxy/cryptarchia/info),
+      fetch(/api/proxy/network/info),
+      fetch(/api/proxy/mantle/metrics),
     ]);
 
     if (!infoRes.ok || !netRes.ok || !memRes.ok) throw new Error('Node API error');

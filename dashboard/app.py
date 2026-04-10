@@ -16,29 +16,39 @@ def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
 
-    # Load config for port/host
+    # Load the Logos node URL once at startup
     try:
         from collector.config import load
         cfg = load()
-        port = cfg.interval_minutes  # not used here
-        del cfg
+        node_url = cfg.axum_url
     except Exception:
-        pass
+        node_url = "http://localhost:38437"
 
-    # Register API blueprint
+    # Proxy: browser calls /api/proxy/<path> → Flask forwards to Logos node
+    # This avoids CORS since browser always talks to the same origin (port 8282)
+    @app.route("/api/proxy/<path:path>", methods=["GET", "POST"])
+    def proxy(path):
+        import requests
+        from flask import request
+        url = f"{node_url}/{path}"
+        try:
+            if request.method == "POST":
+                resp = requests.request(request.method, url, json=request.json,
+                                        timeout=10)
+            else:
+                resp = requests.get(url, timeout=10)
+            return resp.json(), resp.status_code
+        except Exception as e:
+            logger.warning("Proxy error %s -> %s: %s", request.path, url, e)
+            return {"error": str(e)}, 502
+
+    # Register API blueprint (SQLite-based endpoints)
     from .api import api
     app.register_blueprint(api)
 
     @app.route("/")
     def index():
-        # Pass the Logos node API URL to the frontend so it can poll live data
-        try:
-            from collector.config import load
-            cfg = load()
-            node_url = cfg.axum_url
-        except Exception:
-            node_url = "http://localhost:38437"
-        return render_template("index.html", node_url=node_url)
+        return render_template("index.html")
 
     return app
 
