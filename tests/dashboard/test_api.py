@@ -81,7 +81,6 @@ def test_latest_returns_snapshot_row(client, fresh_db):
         lib="abc123def",
         mode="Normal",
         epoch=100,
-        blocks_produced=10,
         mempool_depth=7,
         peer_count=15,
         n_connections=3,
@@ -94,7 +93,6 @@ def test_latest_returns_snapshot_row(client, fresh_db):
     assert data["chain_tip"] == 5000
     assert data["lib"] == "abc123def"
     assert data["mode"] == "Normal"
-    assert data["blocks_produced"] == 10
     assert data["mempool_depth"] == 7
     assert data["peer_count"] == 15
     wallet = json.loads(data["wallet_balances"])
@@ -124,7 +122,7 @@ def test_history_returns_snapshots_since(client, fresh_db):
     ts1 = ((now - 2 * 3600) // 600) * 600
     db_module.write_snapshot(
         db_path=get_db_path(), timestamp=ts1, chain_tip=1000,
-        lib="hash1", mode="Normal", epoch=10, blocks_produced=0,
+        lib="hash1", mode="Normal", epoch=10,
         mempool_depth=1, peer_count=5, n_connections=2, wallet_balances={},
     )
 
@@ -132,7 +130,7 @@ def test_history_returns_snapshots_since(client, fresh_db):
     ts2 = (now // 600) * 600
     db_module.write_snapshot(
         db_path=get_db_path(), timestamp=ts2, chain_tip=1020,
-        lib="hash2", mode="Normal", epoch=11, blocks_produced=20,
+        lib="hash2", mode="Normal", epoch=11,
         mempool_depth=3, peer_count=8, n_connections=4, wallet_balances={},
     )
 
@@ -156,7 +154,7 @@ def test_history_returns_all_when_since_0(client, fresh_db):
     for ts, tip in [(ts1, 1000), (ts2, 1010)]:
         db_module.write_snapshot(
             db_path=get_db_path(), timestamp=ts, chain_tip=tip,
-            lib=f"hash{tip}", mode="Normal", epoch=10, blocks_produced=10,
+            lib=f"hash{tip}", mode="Normal", epoch=10,
             mempool_depth=1, peer_count=5, n_connections=2, wallet_balances={},
         )
 
@@ -207,7 +205,6 @@ def test_latest_snapshot_includes_n_connections(client, fresh_db):
         lib="abc123def",
         mode="Normal",
         epoch=100,
-        blocks_produced=10,
         mempool_depth=7,
         peer_count=15,
         n_connections=7,

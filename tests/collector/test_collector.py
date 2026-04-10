@@ -164,7 +164,6 @@ def test_db_init_creates_schema(tmp_path):
     assert "chain_tip" in columns
     assert "lib" in columns
     assert "mode" in columns
-    assert "blocks_produced" in columns
     assert "mempool_depth" in columns
     assert "peer_count" in columns
     assert "wallet_balances" in columns
@@ -180,14 +179,13 @@ def test_db_insert_or_replace_upsert(tmp_path):
     now = int(time.time())
     ts = (now // 600) * 600
 
-    write_snapshot(db_path, ts, 1000, "libhash1", "Normal", 10, 5, 10, 0, 0, {})
-    write_snapshot(db_path, ts, 1010, "libhash2", "Bootstrapping", 10, 3, 7, 12, 3, {})
+    write_snapshot(db_path, ts, 1000, "libhash1", "Normal", 10, 5, 10, 0, {})
+    write_snapshot(db_path, ts, 1010, "libhash2", "Bootstrapping", 10, 3, 7, 12, {})
 
     snap = get_latest_snapshot(db_path)
     assert snap["chain_tip"] == 1010
     assert snap["lib"] == "libhash2"
     assert snap["mode"] == "Bootstrapping"
-    assert snap["blocks_produced"] == 3
 
 
 def test_db_retention_pruning(tmp_path):
@@ -201,8 +199,8 @@ def test_db_retention_pruning(tmp_path):
     recent_ts = (now // 600) * 600
     old_ts = recent_ts - (91 * 24 * 3600)  # 91 days ago
 
-    write_snapshot(db_path, recent_ts, 1000, "lib1", "Normal", 10, 0, 5, 10, 2, {})
-    write_snapshot(db_path, old_ts, 500, "lib2", "Normal", 5, 0, 2, 5, 1, {})
+    write_snapshot(db_path, recent_ts, 1000, "lib1", "Normal", 10, 0, 5, 10, {})
+    write_snapshot(db_path, old_ts, 500, "lib2", "Normal", 5, 0, 2, 5, {})
 
     deleted = prune_old_snapshots(db_path, retention_days=90)
     assert deleted == 1
@@ -229,11 +227,11 @@ def test_collector_continues_after_partial_api_failure(tmp_path):
 
     config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
 
-    # First: write a prior snapshot so blocks_produced can be calculated
+    # First: write a prior snapshot
     now = int(time.time())
     ts0 = (now // 600) * 600 - 600
     from collector.db import write_snapshot
-    write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, 2, {})
+    write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, {})
 
     # Patch fetch_all so cryptarchia fails but others succeed
     partial_result = FetchResult(
@@ -252,7 +250,6 @@ def test_collector_continues_after_partial_api_failure(tmp_path):
 
     snap = get_latest_snapshot(db_path)
     assert snap["chain_tip"] == 1020
-    assert snap["blocks_produced"] == 20  # 1020 - 1000
 
 
 def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
@@ -306,7 +303,7 @@ def test_collector_writes_zero_blocks_when_all_apis_fail_subsequent_run(tmp_path
     # Prior snapshot exists (chain_tip=1000)
     now = int(time.time())
     ts0 = (now // 600) * 600 - 600
-    write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, 2, {})
+    write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, {})
 
     config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
     all_fail = FetchResult()
