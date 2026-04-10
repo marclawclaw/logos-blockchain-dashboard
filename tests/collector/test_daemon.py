@@ -210,15 +210,28 @@ def test_sigterm_shutdown_logs_clean_message(tmp_path, config_file, temp_db,
 
 def test_sigkill_db_remains_intact_after_hard_kill(tmp_path, config_file, temp_db,
                                                     project_root, wrapper_script):
-    """SIGKILL does not corrupt the DB; committed data and schema are readable."""
+    """SIGKILL does not corrupt the DB; committed data and schema are readable.
+
+    Writes 3 snapshots at known fixed 10-min windows that are far from the
+    current time (and therefore far from any window the collector will use),
+    sends SIGKILL to the collector subprocess, then verifies:
+      - Schema is intact
+      - All 3 pre-written rows are present with correct values
+      - PRAGMA integrity_check passes
+    """
     from collector.db import init_db, write_snapshot
 
     init_db(temp_db)
 
-    now = int(time.time())
-    snapshots = []
+    # Use 10-min windows that are 20, 30, 40 minutes in the past relative to
+    # test start. The collector (running ~2 s later) writes at the current window,
+    # which is at least 20 min away from these, so no INSERT OR REPLACE collision.
+    now_start = int(time.time())
+    base_window = ((now_start - 1200) // 600) * 600  # 20 min ago, aligned to 10-min
+
+    snapshots_written = []
     for i in range(3):
-        ts = (now // 600) * 600 - (2 - i) * 600
+        ts = base_window - i * 600
         write_snapshot(
             db_path=temp_db,
             timestamp=ts,
@@ -231,7 +244,7 @@ def test_sigkill_db_remains_intact_after_hard_kill(tmp_path, config_file, temp_d
             n_connections=3 + i,
             wallet_balances={f"wallet_{i}": (i + 1) * 1000},
         )
-        snapshots.append((ts, 10000 + i * 100))
+        snapshots_written.append((ts, 10000 + i * 100))
 
     proc = subprocess.Popen(
         [sys.executable, wrapper_script,
@@ -249,20 +262,21 @@ def test_sigkill_db_remains_intact_after_hard_kill(tmp_path, config_file, temp_d
     conn = sqlite3.connect(temp_db)
     table_info = conn.execute("PRAGMA table_info(snapshots)").fetchall()
     columns = {r[1] for r in table_info}
-    assert "timestamp" in columns
-    assert "chain_tip" in columns
-    assert "wallet_balances" in columns
+    assert "timestamp" in columns, "timestamp column missing after SIGKILL"
+    assert "chain_tip" in columns, "chain_tip column missing after SIGKILL"
+    assert "wallet_balances" in columns, "wallet_balances column missing after SIGKILL"
 
-    # All committed rows present
+    # All pre-written rows present (the collector may have written a 4th row,
+    # which is fine — the key is that pre-written data is not lost)
     rows = conn.execute(
         "SELECT timestamp, chain_tip FROM snapshots ORDER BY timestamp"
     ).fetchall()
     conn.close()
 
-    assert len(rows) == 3, f"Expected 3 snapshots, got {len(rows)}"
-    for ts, tip in snapshots:
+    for ts, tip in snapshots_written:
         assert any(r[0] == ts and r[1] == tip for r in rows), (
-            f"Snapshot (ts={ts}, tip={tip}) missing after SIGKILL"
+            f"Pre-written snapshot (ts={ts}, tip={tip}) missing after SIGKILL. "
+            f"Found rows: {rows}"
         )
 
     # PRAGMA integrity_check passes
@@ -274,16 +288,24 @@ def test_sigkill_db_remains_intact_after_hard_kill(tmp_path, config_file, temp_d
 
 def test_sigkill_pre_written_snapshot_survives(tmp_path, config_file, temp_db,
                                                 project_root, wrapper_script):
-    """A snapshot written before SIGKILL is readable after the hard kill."""
-    from collector.db import init_db, write_snapshot, get_latest_snapshot
+    """A snapshot written before SIGKILL is readable after the hard kill.
+
+    Writes one snapshot at a 10-min window 30 min in the past (far from any
+    window the collector will use), then verifies it is readable after SIGKILL.
+    Uses get_snapshots_since to find it by timestamp rather than relying on
+    get_latest_snapshot (which would return the collector's row if they share
+    the same 10-min window).
+    """
+    from collector.db import init_db, write_snapshot, get_snapshots_since
 
     init_db(temp_db)
 
-    now = int(time.time())
-    ts = (now // 600) * 600 - 600
+    now_start = int(time.time())
+    # Write to a window 30 min ago — well away from the collector's current window
+    pre_ts = ((now_start - 1800) // 600) * 600
     write_snapshot(
         db_path=temp_db,
-        timestamp=ts,
+        timestamp=pre_ts,
         chain_tip=7000,
         lib="pre_kill_lib",
         mode="Normal",
@@ -306,8 +328,11 @@ def test_sigkill_pre_written_snapshot_survives(tmp_path, config_file, temp_db,
     proc.send_signal(signal.SIGKILL)
     proc.wait(timeout=5)
 
-    snap = get_latest_snapshot(temp_db)
-    assert snap is not None, "Pre-written snapshot must survive SIGKILL"
+    # Find the pre-written snapshot by its known timestamp
+    rows = get_snapshots_since(temp_db, pre_ts - 1)
+    assert len(rows) >= 1, f"Pre-written snapshot at {pre_ts} not found after SIGKILL"
+    snap = next(r for r in rows if r["timestamp"] == pre_ts)
+    assert snap is not None, f"Pre-written snapshot at {pre_ts} not found"
     assert snap["chain_tip"] == 7000
     assert snap["lib"] == "pre_kill_lib"
     assert snap["wallet_balances"] == '{"survivor_wallet": 54321}'
