@@ -42,11 +42,13 @@ python -m dashboard
 
 # Run both (for local dev)
 python -m collector run --daemon & python -m dashboard
-
-# Docker
-docker build -t logos-dashboard .
-docker run -v ~/.config/logos-node:/node-config logos-dashboard
 ```
+
+> **Docker:** Post-MVP. Remove this once implemented.
+> ```bash
+> docker build -t logos-dashboard .
+> docker run -p 8282:8282 -v /home/user/.config/logos-node:/node-config logos-dashboard
+> ```
 
 ## Project Structure
 
@@ -64,12 +66,17 @@ logos-blockchain-dashboard/
 │   ├── fetcher.py            # API calls to Logos node
 │   ├── db.py                 # SQLite schema + writes
 │   └── config.py             # Config loading + yaml parsing
-└── dashboard/
-    ├── __init__.py
-    ├── app.py                # Flask app
-    ├── api.py                # /api/* endpoints
-    └── templates/
-        └── index.html        # Single-page dashboard
+├── dashboard/
+│   ├── __init__.py
+│   ├── app.py                # Flask app
+│   ├── api.py                # /api/* endpoints
+│   └── templates/
+│       └── index.html        # Single-page dashboard
+└── tests/
+    ├── collector/
+    │   └── test_collector.py
+    └── dashboard/
+        └── test_api.py
 ```
 
 ## Code Style
@@ -86,7 +93,10 @@ def fetch_cryptarchia_info(base_url: str) -> dict:
     url = f"{base_url}/cryptarchia/info"
     resp = requests.get(url, timeout=10)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise ValueError(f"Unexpected response type from {url}: {type(data)}")
+    return data
 ```
 
 **YAML config:**
@@ -107,35 +117,122 @@ wallets:
 ```sql
 CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp INTEGER NOT NULL,          -- Unix epoch
+    timestamp INTEGER NOT NULL,          -- Unix epoch (UTC)
     chain_tip INTEGER NOT NULL,
     lib INTEGER NOT NULL,
     epoch INTEGER,
     blocks_produced INTEGER DEFAULT 0,   -- Delta since last snapshot
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
-    wallet_balances TEXT NOT NULL,       -- JSON: {"wallet_1": balance, "wallet_2": balance}
-    UNIQUE(timestamp)                    -- One snapshot per 10-min interval
+    wallet_balances TEXT NOT NULL,       -- JSON: {"voucher": balance, "funding": balance}
+    UNIQUE(timestamp)                   -- One snapshot per 10-min interval
 );
 CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 ```
 
+## Snapshot and Data Logic
+
+**Delta calculation (`blocks_produced`):**
+```python
+def compute_blocks_produced(current_tip: int, previous_tip: int | None) -> int:
+    if previous_tip is None:
+        return 0  # First snapshot ever
+    return max(0, current_tip - previous_tip)
+```
+
+**Timestamp:** Unix epoch integer (UTC). The 10-minute window aligns to `now // 600 * 600` (truncated to nearest 10 min).
+
+**Upsert policy:** `INSERT OR REPLACE INTO snapshots ...` — if a snapshot for the same 10-min window already exists, replace it. This handles collector restarts gracefully.
+
+**Retention:** Rows with `timestamp < (now - 90 days)` are deleted on collector startup and after each snapshot write.
+
+**Timestamps in database:** Always UTC Unix epoch integers.
+**Timestamps in dashboard:** Always rendered in the browser's local timezone.
+
+## Config Loading
+
+**Auto-detect from `user_config.yaml`:**
+1. Read `node_config_path` from `config.yaml` (default: `~/.config/logos-node/user_config.yaml`)
+2. Parse `api.backend.listen_address` → extract port → set `axum_url`
+3. Parse `wallet.known_keys` → extract all public key addresses → populate wallet list
+4. If `wallet` section exists in `config.yaml`, merge and override (allows renaming, filtering)
+5. If `wallets` is empty after auto-parse, log a warning and continue with empty list
+
+**Missing `user_config.yaml`:** If the file doesn't exist and no manual `node.axum_url` is set in `config.yaml`, the collector raises a `ConfigError` on startup with a clear message:
+```
+Error: No API URL configured. Set node_config_path in config.yaml or specify node.axum_url manually.
+```
+
+**Wallet validation:** If a wallet address in the config is not a valid base58 string, log a warning and skip that wallet.
+
+## Failure Modes
+
+**Single API endpoint fails:**
+- Log error with URL and HTTP status or exception message
+- That metric is recorded as `null`/`None` for this interval
+- Snapshot still written with other metrics
+- Dashboard shows last known value for that metric (from most recent non-null snapshot)
+
+**All API endpoints fail (first run, no prior snapshot):**
+- Dashboard shows an error banner: "Node unreachable — cannot connect to APIs. Check node status and config."
+- Historical graphs show "No data" state
+
+**All API endpoints fail (subsequent runs, prior snapshots exist):**
+- Snapshot is skipped entirely (not written)
+- Dashboard continues to show last known values
+
+**Database write fails:**
+- Collector logs the error
+- Collector retries once after 30 seconds
+- If retry fails, collector logs a fatal error and exits with code 1
+- Dashboard remains functional (serves from last successful snapshot)
+
+**Malformed API response (HTTP 200 but bad JSON, missing fields, wrong types):**
+- `resp.json()` raises `JSONDecodeError` → treated as endpoint failure (see above)
+- Response has unexpected structure (e.g., `null` for a required field) → treated as endpoint failure
+- Wallet balance not a number → log warning, record as `null`
+
+## Empty State (First Run)
+
+**0 snapshots in database:**
+- Dashboard banner: "Collecting data — first snapshot in approximately 10 minutes"
+- All current-value panels show "—" (dashes) until first snapshot arrives
+- Historical graphs render as empty charts with axes but no data lines
+
+**< 24 hours of data:**
+- Historical graphs display all available data
+- If < 1 hour of data: show banner "Very little data — graphs become meaningful after a few hours"
+
+## Chart Types
+
+All time-series data rendered as **line charts** using Chart.js. One chart per metric:
+
+| Metric | Y-axis | X-axis |
+|--------|--------|--------|
+| Chain tip height | Block height | Time |
+| LIB height | Block height | Time |
+| Blocks produced (per interval) | Count | Time |
+| Mempool depth | Tx count | Time |
+| Peer count | Peer count | Time |
+| Wallet balances | Native token units | Time |
+
 ## Testing Strategy
 
-**Collector tests:**
-- Mock HTTP responses, verify correct data stored in SQLite
+**Collector tests (`tests/collector/`):**
+- Mock HTTP responses with `unittest.mock.patch`
+- Verify correct data stored in SQLite
 - Test config parsing: yaml auto-detect + manual override
-- Test retention pruning (rows older than 30 days deleted on startup)
+- Test retention pruning (rows older than 90 days deleted on startup)
+- Test malformed response handling (bad JSON, null fields)
+- Test `blocks_produced` delta calculation including first-snapshot edge case
 
-**Dashboard API tests:**
-- Mock SQLite responses, verify JSON structure returned
+**Dashboard API tests (`tests/dashboard/`):**
+- Mock SQLite responses
+- Verify JSON structure returned by each endpoint
 - Test 404 on unknown endpoint
+- Test empty-state response
 
-**Frontend:**
-- Manual testing only for MVP (Chart.js renders, live refresh works)
-- No JS test framework
-
-**Test locations:** `collector/test_*.py`, `dashboard/test_*.py`
+**Frontend:** Manual testing only for MVP.
 
 ## Boundaries
 
@@ -143,14 +240,19 @@ CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 - Parse `user_config.yaml` automatically if present
 - Log API errors with URL and response code
 - Graceful degradation if any API endpoint fails (show last known value)
-- Store timestamps as Unix epoch integers in SQLite
+- Store timestamps as Unix epoch integers in SQLite (UTC)
 - Dashboard port defaults to `8282`
+- Render timestamps in browser's local timezone
+- Use `INSERT OR REPLACE` for snapshot writes
+- Prune snapshots older than 90 days on startup and after each write
+- Line charts for all time-series data
 
 **Ask first:**
 - Adding new API endpoints to poll
 - Changing snapshot interval (10 min is deliberate)
 - Adding external dependencies beyond PyYAML, requests, Flask
 - Schema changes to snapshots table
+- Switching chart library
 
 **Never:**
 - Write to the blockchain or submit transactions
@@ -161,20 +263,17 @@ CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 ## Success Criteria
 
 - [ ] `python -m collector init-db` creates `data/snapshots.db` with correct schema
-- [ ] `python -m collector run` polls all APIs and stores snapshot every 10 min
+- [ ] `python -m collector run` polls all APIs and stores a snapshot every 10 min (aligned to 10-min boundary)
+- [ ] `python -m collector run --daemon` survives restart; duplicate 10-min windows use `INSERT OR REPLACE`
 - [ ] `python -m dashboard` serves dashboard on port 8282
-- [ ] Dashboard shows: chain tip, LIB, mempool depth, peer count, wallet balances
-- [ ] Historical graphs show at least 24 hours of data when page is open
+- [ ] Dashboard shows: chain tip, LIB, epoch, mempool depth, peer count, wallet balances
 - [ ] Dashboard auto-refreshes every 5s when tab is visible, stops when hidden
-- [ ] Config auto-detects API URL and wallet addresses from `user_config.yaml`
+- [ ] Config auto-detects API URL from `api.backend.listen_address` in `user_config.yaml`
+- [ ] Config auto-detects wallet addresses from `wallet.known_keys` in `user_config.yaml`
 - [ ] Collector logs errors without crashing when an API is temporarily unavailable
+- [ ] Malformed API responses are logged and treated as endpoint failures, not crashes
+- [ ] First run (0 snapshots): dashboard shows "Collecting data" banner and "—" for current values
+- [ ] Historical graphs display all available data up to 90 days; empty charts when no data
+- [ ] Timestamps stored as UTC Unix epoch; rendered in browser's local timezone
+- [ ] Snapshot retention: 90 days — older rows pruned on startup and after each write
 - [ ] README has clear setup instructions for a new node operator
-- [ ] Snapshot retention: 90 days (older rows pruned on startup)
-
-## Open Questions
-
-1. ~~Should the collector also poll Sequencer RPC (`get_last_block`) or is `/cryptarchia/info` sufficient for chain tip?~~ — Assumed: `/cryptarchia/info` sufficient
-2. Chart types: line graphs for all time-series data, or are there specific preferences?
-3. ~~Retention policy~~ — Confirmed: 90 days
-4. Docker: is this a hard MVP requirement or post-MVP?
-5. ~~Which wallets to monitor?~~ — Assumed: both from `wallet.known_keys` (voucher + funding)
