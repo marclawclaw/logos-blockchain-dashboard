@@ -256,8 +256,7 @@ def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
     """Collector behaviour when all APIs fail on first run.
 
     Spec says: "snapshot is skipped entirely (not written)".
-    Actual: a snapshot IS written (with all-null metrics).
-    This is a spec-implementation gap — collector always writes.
+    Implementation: correctly skips when all APIs fail.
     """
     from collector.main import _collect_and_store
     from collector.db import init_db, get_latest_snapshot
@@ -276,21 +275,15 @@ def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
         _collect_and_store(config, db_path)
 
     snap = get_latest_snapshot(db_path)
-    # Spec says: skip write. Implementation: writes with nulls.
-    # The dashboard handles nulls by showing last known values.
-    # GAP: spec and implementation are misaligned here.
-    assert snap is not None          # implementation writes
-    assert snap["chain_tip"] is None
+    # Spec says: skip write when all APIs fail
+    assert snap is None
 
 
-def test_collector_writes_zero_blocks_when_all_apis_fail_subsequent_run(tmp_path):
+def test_collector_skips_snapshot_when_all_apis_fail_subsequent_run(tmp_path):
     """Subsequent run when all APIs fail.
 
     Spec says: "snapshot is skipped entirely (not written)".
-    Actual: a snapshot IS written with chain_tip=None (prior tip NOT retained).
-    This is a spec-implementation gap. The dashboard correctly shows the
-    last non-null snapshot for chain_tip, so this doesn't break the UI,
-    but the stale null-row in the DB is unexpected.
+    Prior snapshot is preserved.
     """
     from collector.main import _collect_and_store
     from collector.db import init_db, get_latest_snapshot, write_snapshot
@@ -312,9 +305,9 @@ def test_collector_writes_zero_blocks_when_all_apis_fail_subsequent_run(tmp_path
         _collect_and_store(config, db_path)
 
     snap = get_latest_snapshot(db_path)
+    # Spec says: skip write when all APIs fail — prior snapshot preserved
     assert snap is not None
-    # Implementation writes None instead of retaining prior tip
-    assert snap["chain_tip"] is None
+    assert snap["chain_tip"] == 1000
 
 
 def test_snapshot_assembly():
