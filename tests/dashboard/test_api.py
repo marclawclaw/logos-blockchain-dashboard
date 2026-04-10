@@ -36,7 +36,6 @@ def fresh_db():
     db_module.init_db(path)
 
     # Patch get_db_path to return our temp path
-    import dashboard.api
     original_get_db_path = api_module.get_db_path
 
     def fake_get_db_path():
@@ -52,6 +51,26 @@ def fresh_db():
         os.unlink(path)
     except OSError:
         pass
+
+
+def _write(db_path, hours_ago, chain_tip, **kw):
+    """Helper: write a snapshot hours_ago from now."""
+    import collector.db as db_module
+    now = int(time.time())
+    ts = ((now - hours_ago * 3600) // 600) * 600
+    db_module.write_snapshot(
+        db_path=db_path,
+        timestamp=ts,
+        chain_tip=chain_tip,
+        lib=f"hash{chain_tip}",
+        mode="Normal",
+        epoch=10,
+        mempool_depth=1,
+        peer_count=5,
+        n_connections=2,
+        wallet_balances={},
+        **kw,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +100,6 @@ def test_latest_returns_snapshot_row(client, fresh_db):
         lib="abc123def",
         mode="Normal",
         epoch=100,
-        blocks_produced=10,
         mempool_depth=7,
         peer_count=15,
         n_connections=3,
@@ -94,7 +112,6 @@ def test_latest_returns_snapshot_row(client, fresh_db):
     assert data["chain_tip"] == 5000
     assert data["lib"] == "abc123def"
     assert data["mode"] == "Normal"
-    assert data["blocks_produced"] == 10
     assert data["mempool_depth"] == 7
     assert data["peer_count"] == 15
     wallet = json.loads(data["wallet_balances"])
@@ -106,7 +123,7 @@ def test_latest_returns_snapshot_row(client, fresh_db):
 # ---------------------------------------------------------------------------
 
 def test_history_without_since_uses_default_window(client, fresh_db):
-    """/api/snapshots without "since" param uses default 24-hour window."""
+    """/api/snapshots without hours param uses default 24-hour window."""
     resp = client.get("/api/snapshots")
     assert resp.status_code == 200
     data = json.loads(resp.data)
@@ -114,56 +131,118 @@ def test_history_without_since_uses_default_window(client, fresh_db):
 
 
 def test_history_returns_snapshots_since(client, fresh_db):
-    """Correct time window returned for given hours=N."""
-    import collector.db as db_module
+    """hours=1: only snapshots within the last hour are returned."""
     from dashboard.api import get_db_path
+    db_path = get_db_path()
 
-    now = int(time.time())
-
-    # Snapshot 1: 2 hours ago
-    ts1 = ((now - 2 * 3600) // 600) * 600
-    db_module.write_snapshot(
-        db_path=get_db_path(), timestamp=ts1, chain_tip=1000,
-        lib="hash1", mode="Normal", epoch=10, blocks_produced=0,
-        mempool_depth=1, peer_count=5, n_connections=2, wallet_balances={},
-    )
-
-    # Snapshot 2: now
-    ts2 = (now // 600) * 600
-    db_module.write_snapshot(
-        db_path=get_db_path(), timestamp=ts2, chain_tip=1020,
-        lib="hash2", mode="Normal", epoch=11, blocks_produced=20,
-        mempool_depth=3, peer_count=8, n_connections=4, wallet_balances={},
-    )
+    # 2 hours ago — outside 1-hour window
+    _write(db_path, hours_ago=2, chain_tip=1000)
+    # now — within 1-hour window
+    _write(db_path, hours_ago=0, chain_tip=1020)
 
     resp = client.get("/api/snapshots?hours=1")
     assert resp.status_code == 200
     data = json.loads(resp.data)
-    # ts1 is outside the 1-hour window
     assert data["count"] == 1
     assert data["snapshots"][0]["chain_tip"] == 1020
 
 
 def test_history_returns_all_when_since_0(client, fresh_db):
     """/api/snapshots?since=0 returns all snapshots."""
-    import collector.db as db_module
     from dashboard.api import get_db_path
+    db_path = get_db_path()
 
-    now = int(time.time())
-    ts1 = ((now - 3600) // 600) * 600
-    ts2 = (now // 600) * 600
-
-    for ts, tip in [(ts1, 1000), (ts2, 1010)]:
-        db_module.write_snapshot(
-            db_path=get_db_path(), timestamp=ts, chain_tip=tip,
-            lib=f"hash{tip}", mode="Normal", epoch=10, blocks_produced=10,
-            mempool_depth=1, peer_count=5, n_connections=2, wallet_balances={},
-        )
+    _write(db_path, hours_ago=1, chain_tip=1000)
+    _write(db_path, hours_ago=0, chain_tip=1010)
 
     resp = client.get("/api/snapshots?since=0")
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["count"] == 2
+
+
+def test_snapshots_filter_by_24_hours(client, fresh_db):
+    """hours=24: snapshots older than 24h excluded."""
+    from dashboard.api import get_db_path
+    db_path = get_db_path()
+
+    # 23 hours ago — within window
+    _write(db_path, hours_ago=23, chain_tip=1001)
+    # 25 hours ago — outside window
+    _write(db_path, hours_ago=25, chain_tip=1000)
+
+    resp = client.get("/api/snapshots?hours=24")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["count"] == 1
+    assert data["snapshots"][0]["chain_tip"] == 1001
+
+
+def test_snapshots_filter_by_1_week(client, fresh_db):
+    """hours=168 (7 days): snapshots older than 7 days excluded."""
+    from dashboard.api import get_db_path
+    db_path = get_db_path()
+
+    # 3 days ago — within 7-day window
+    _write(db_path, hours_ago=3 * 24, chain_tip=2001)
+    # 8 days ago — outside 7-day window
+    _write(db_path, hours_ago=8 * 24, chain_tip=2000)
+
+    resp = client.get("/api/snapshots?hours=168")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["count"] == 1
+    assert data["snapshots"][0]["chain_tip"] == 2001
+
+
+def test_snapshots_filter_by_1_month(client, fresh_db):
+    """hours=720 (30 days): snapshots older than 30 days excluded."""
+    from dashboard.api import get_db_path
+    db_path = get_db_path()
+
+    # 10 days ago — within 30-day window
+    _write(db_path, hours_ago=10 * 24, chain_tip=3001)
+    # 35 days ago — outside 30-day window
+    _write(db_path, hours_ago=35 * 24, chain_tip=3000)
+
+    resp = client.get("/api/snapshots?hours=720")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["count"] == 1
+    assert data["snapshots"][0]["chain_tip"] == 3001
+
+
+def test_snapshots_max_returns_all_via_hours_zero(client, fresh_db):
+    """hours=0 returns all snapshots regardless of age (Max button)."""
+    from dashboard.api import get_db_path
+    db_path = get_db_path()
+
+    # 60 days ago — within 90-day retention
+    _write(db_path, hours_ago=60 * 24, chain_tip=4001)
+    # 1 hour ago
+    _write(db_path, hours_ago=1, chain_tip=4002)
+
+    resp = client.get("/api/snapshots?hours=0")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["count"] == 2
+
+
+def test_snapshots_default_is_24_hours(client, fresh_db):
+    """No hours param: API defaults to 24-hour window."""
+    from dashboard.api import get_db_path
+    db_path = get_db_path()
+
+    # 12 hours ago — within default window
+    _write(db_path, hours_ago=12, chain_tip=5001)
+    # 30 hours ago — outside default window
+    _write(db_path, hours_ago=30, chain_tip=5000)
+
+    resp = client.get("/api/snapshots")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["count"] == 1
+    assert data["snapshots"][0]["chain_tip"] == 5001
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +286,6 @@ def test_latest_snapshot_includes_n_connections(client, fresh_db):
         lib="abc123def",
         mode="Normal",
         epoch=100,
-        blocks_produced=10,
         mempool_depth=7,
         peer_count=15,
         n_connections=7,
