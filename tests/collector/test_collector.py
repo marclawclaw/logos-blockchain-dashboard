@@ -256,11 +256,10 @@ def test_collector_continues_after_partial_api_failure(tmp_path):
 
 
 def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
-    """Collector behaviour when all APIs fail on first run.
+    """All APIs fail on first run: snapshot is skipped entirely (not written).
 
-    Spec says: "snapshot is skipped entirely (not written)".
-    Actual: a snapshot IS written (with all-null metrics).
-    This is a spec-implementation gap — collector always writes.
+    Per the spec: "All API endpoints fail (first run, no prior snapshot):
+    Dashboard shows an error banner." — this means no null snapshot is written.
     """
     from collector.main import _collect_and_store
     from collector.db import init_db, get_latest_snapshot
@@ -279,21 +278,16 @@ def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
         _collect_and_store(config, db_path)
 
     snap = get_latest_snapshot(db_path)
-    # Spec says: skip write. Implementation: writes with nulls.
-    # The dashboard handles nulls by showing last known values.
-    # GAP: spec and implementation are misaligned here.
-    assert snap is not None          # implementation writes
-    assert snap["chain_tip"] is None
+    # No snapshot written when all APIs fail — DB stays empty
+    assert snap is None
 
 
-def test_collector_writes_zero_blocks_when_all_apis_fail_subsequent_run(tmp_path):
-    """Subsequent run when all APIs fail.
+def test_collector_skips_snapshot_when_all_apis_fail_subsequent_run(tmp_path):
+    """Subsequent run when all APIs fail: prior snapshot is preserved, no new row written.
 
-    Spec says: "snapshot is skipped entirely (not written)".
-    Actual: a snapshot IS written with chain_tip=None (prior tip NOT retained).
-    This is a spec-implementation gap. The dashboard correctly shows the
-    last non-null snapshot for chain_tip, so this doesn't break the UI,
-    but the stale null-row in the DB is unexpected.
+    Per the spec: "All API endpoints fail (subsequent runs, prior snapshots exist):
+    Snapshot is skipped entirely (not written). Dashboard continues to show
+    last known values."
     """
     from collector.main import _collect_and_store
     from collector.db import init_db, get_latest_snapshot, write_snapshot
@@ -315,9 +309,9 @@ def test_collector_writes_zero_blocks_when_all_apis_fail_subsequent_run(tmp_path
         _collect_and_store(config, db_path)
 
     snap = get_latest_snapshot(db_path)
+    # Prior snapshot is preserved — no new null-row written
     assert snap is not None
-    # Implementation writes None instead of retaining prior tip
-    assert snap["chain_tip"] is None
+    assert snap["chain_tip"] == 1000
 
 
 def test_snapshot_assembly():
