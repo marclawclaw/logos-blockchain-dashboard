@@ -219,9 +219,10 @@
 let charts = {};
 let lastSnapshot = null;
 let refreshInterval = null;
-const REFRESH_MS = 5000;          // 5 seconds when page is visible
+let lastLiveFetch = null;           // Unix timestamp of last successful node-API fetch
+const REFRESH_MS = 5000;            // 5 seconds when page is visible
 const API_BASE = '/api';
-const NODE_URL = '{{ node_url }}';  // Logos node API (from server-side config)
+const NODE_URL = '{{ node_url }}';   // Logos node API (from server-side config)
 const HOURS = 72;                   // Historical window for charts
 
 // ─────────────────────────────────────────────────────────────
@@ -323,8 +324,10 @@ async function fetchLatest() {
     const net = await netRes.json();
     const mem = await memRes.json();
 
+    lastLiveFetch = Math.floor(Date.now() / 1000);
+
     return {
-      _ts: Math.floor(Date.now() / 1000),
+      _ts: lastLiveFetch,
       chain_tip: info.height,
       mode: info.mode,
       epoch: info.slot,
@@ -353,12 +356,46 @@ async function fetchHistory() {
 // Update UI
 // ─────────────────────────────────────────────────────────────
 function updateLatest(snap) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+
   if (!snap) {
-    showBanner('Node unreachable — cannot connect to APIs. Check node status and config.', 'error');
+    // No live data available — fall back to snapshot data
+    if (lastSnapshot) {
+      // Node unreachable but we have a recent snapshot — show it and warn
+      const snapAge = Date.now() / 1000 - lastSnapshot.timestamp;
+      if (snapAge > 900) {  // 15 min — beyond collector interval + buffer
+        showBanner('Node unreachable — showing last known data (may be stale).', 'error');
+        dot.className = 'error';
+        txt.textContent = 'Offline';
+      } else {
+        hideBanner();
+        dot.className = 'stale';
+        txt.textContent = 'Reconnecting...';
+      }
+      // Display snapshot values (last known)
+      renderSnapshot(lastSnapshot);
+    } else {
+      showBanner('Node unreachable — cannot connect to APIs. Check node status and config.', 'error');
+      dot.className = 'error';
+      txt.textContent = 'Offline';
+    }
     return;
   }
-  hideBanner();
 
+  hideBanner();
+  lastSnapshot = snap;  // cache for when node goes down
+
+  renderSnapshot(snap);
+
+  // Status — always Live when we have a recent live fetch
+  dot.className = '';
+  txt.textContent = 'Live';
+
+  document.getElementById('refresh-info').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+}
+
+function renderSnapshot(snap) {
   const ts = snap._ts ?? snap.timestamp;
 
   // Chain
@@ -405,15 +442,6 @@ function updateLatest(snap) {
       if (ds) pushPoint(charts.wallets, ts, val);
     }
   }
-
-  // Status
-  const age = Date.now() / 1000 - ts;
-  const dot = document.getElementById('status-dot');
-  const txt = document.getElementById('status-text');
-  dot.className = age > 300 ? 'stale' : '';
-  txt.textContent = age > 300 ? `Stale (${Math.floor(age/60)}m old)` : 'Live';
-
-  document.getElementById('refresh-info').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
 }
 
 function updateHistory(data) {

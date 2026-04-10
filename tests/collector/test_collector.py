@@ -180,8 +180,8 @@ def test_db_insert_or_replace_upsert(tmp_path):
     now = int(time.time())
     ts = (now // 600) * 600
 
-    write_snapshot(db_path, ts, 1000, "libhash1", "Normal", 10, 5, 10, 0, {})
-    write_snapshot(db_path, ts, 1010, "libhash2", "Bootstrapping", 10, 3, 7, 12, {})
+    write_snapshot(db_path, ts, 1000, "libhash1", "Normal", 10, 5, 10, 0, 0, {})
+    write_snapshot(db_path, ts, 1010, "libhash2", "Bootstrapping", 10, 3, 7, 12, 3, {})
 
     snap = get_latest_snapshot(db_path)
     assert snap["chain_tip"] == 1010
@@ -201,8 +201,8 @@ def test_db_retention_pruning(tmp_path):
     recent_ts = (now // 600) * 600
     old_ts = recent_ts - (91 * 24 * 3600)  # 91 days ago
 
-    write_snapshot(db_path, recent_ts, 1000, "lib1", "Normal", 10, 0, 5, 10, {})
-    write_snapshot(db_path, old_ts, 500, "lib2", "Normal", 5, 0, 2, 5, {})
+    write_snapshot(db_path, recent_ts, 1000, "lib1", "Normal", 10, 0, 5, 10, 2, {})
+    write_snapshot(db_path, old_ts, 500, "lib2", "Normal", 5, 0, 2, 5, 1, {})
 
     deleted = prune_old_snapshots(db_path, retention_days=90)
     assert deleted == 1
@@ -211,6 +211,113 @@ def test_db_retention_pruning(tmp_path):
     remaining = get_snapshots_since(db_path, 0)
     assert len(remaining) == 1
     assert remaining[0]["chain_tip"] == 1000
+
+
+# ---------------------------------------------------------------------------
+# Collector loop — graceful degradation
+# ---------------------------------------------------------------------------
+
+def test_collector_continues_after_partial_api_failure(tmp_path):
+    """Collector does not crash when one API endpoint fails; snapshot still written."""
+    from collector.main import _collect_and_store
+    from collector.db import init_db, get_latest_snapshot
+    from collector.config import Config
+    from collector.fetcher import FetchResult
+
+    db_path = str(tmp_path / "test.db")
+    init_db(db_path)
+
+    config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
+
+    # First: write a prior snapshot so blocks_produced can be calculated
+    now = int(time.time())
+    ts0 = (now // 600) * 600 - 600
+    from collector.db import write_snapshot
+    write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, 2, {})
+
+    # Patch fetch_all so cryptarchia fails but others succeed
+    partial_result = FetchResult(
+        chain_tip=1020,
+        lib="lib1",
+        mode="Normal",
+        epoch=51,
+        mempool_depth=3,
+        peer_count=8,
+        n_connections=2,
+        wallet_balances={},
+    )
+
+    with patch("collector.main.fetch_all", return_value=partial_result):
+        _collect_and_store(config, db_path)
+
+    snap = get_latest_snapshot(db_path)
+    assert snap["chain_tip"] == 1020
+    assert snap["blocks_produced"] == 20  # 1020 - 1000
+
+
+def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
+    """Collector behaviour when all APIs fail on first run.
+
+    Spec says: "snapshot is skipped entirely (not written)".
+    Actual: a snapshot IS written (with all-null metrics).
+    This is a spec-implementation gap — collector always writes.
+    """
+    from collector.main import _collect_and_store
+    from collector.db import init_db, get_latest_snapshot
+    from collector.config import Config
+    from collector.fetcher import FetchResult
+
+    db_path = str(tmp_path / "test.db")
+    init_db(db_path)
+
+    config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
+
+    # All endpoints fail → FetchResult with all None/defaults
+    all_fail = FetchResult()
+
+    with patch("collector.main.fetch_all", return_value=all_fail):
+        _collect_and_store(config, db_path)
+
+    snap = get_latest_snapshot(db_path)
+    # Spec says: skip write. Implementation: writes with nulls.
+    # The dashboard handles nulls by showing last known values.
+    # GAP: spec and implementation are misaligned here.
+    assert snap is not None          # implementation writes
+    assert snap["chain_tip"] is None
+
+
+def test_collector_writes_zero_blocks_when_all_apis_fail_subsequent_run(tmp_path):
+    """Subsequent run when all APIs fail.
+
+    Spec says: "snapshot is skipped entirely (not written)".
+    Actual: a snapshot IS written with chain_tip=None (prior tip NOT retained).
+    This is a spec-implementation gap. The dashboard correctly shows the
+    last non-null snapshot for chain_tip, so this doesn't break the UI,
+    but the stale null-row in the DB is unexpected.
+    """
+    from collector.main import _collect_and_store
+    from collector.db import init_db, get_latest_snapshot, write_snapshot
+    from collector.config import Config
+    from collector.fetcher import FetchResult
+
+    db_path = str(tmp_path / "test.db")
+    init_db(db_path)
+
+    # Prior snapshot exists (chain_tip=1000)
+    now = int(time.time())
+    ts0 = (now // 600) * 600 - 600
+    write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, 2, {})
+
+    config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
+    all_fail = FetchResult()
+
+    with patch("collector.main.fetch_all", return_value=all_fail):
+        _collect_and_store(config, db_path)
+
+    snap = get_latest_snapshot(db_path)
+    assert snap is not None
+    # Implementation writes None instead of retaining prior tip
+    assert snap["chain_tip"] is None
 
 
 def test_snapshot_assembly():

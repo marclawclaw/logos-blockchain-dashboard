@@ -84,6 +84,7 @@ def test_latest_returns_snapshot_row(client, fresh_db):
         blocks_produced=10,
         mempool_depth=7,
         peer_count=15,
+        n_connections=3,
         wallet_balances={"voucher": 9999},
     )
 
@@ -124,7 +125,7 @@ def test_history_returns_snapshots_since(client, fresh_db):
     db_module.write_snapshot(
         db_path=get_db_path(), timestamp=ts1, chain_tip=1000,
         lib="hash1", mode="Normal", epoch=10, blocks_produced=0,
-        mempool_depth=1, peer_count=5, wallet_balances={},
+        mempool_depth=1, peer_count=5, n_connections=2, wallet_balances={},
     )
 
     # Snapshot 2: now
@@ -132,7 +133,7 @@ def test_history_returns_snapshots_since(client, fresh_db):
     db_module.write_snapshot(
         db_path=get_db_path(), timestamp=ts2, chain_tip=1020,
         lib="hash2", mode="Normal", epoch=11, blocks_produced=20,
-        mempool_depth=3, peer_count=8, wallet_balances={},
+        mempool_depth=3, peer_count=8, n_connections=4, wallet_balances={},
     )
 
     resp = client.get("/api/snapshots?hours=1")
@@ -156,7 +157,7 @@ def test_history_returns_all_when_since_0(client, fresh_db):
         db_module.write_snapshot(
             db_path=get_db_path(), timestamp=ts, chain_tip=tip,
             lib=f"hash{tip}", mode="Normal", epoch=10, blocks_produced=10,
-            mempool_depth=1, peer_count=5, wallet_balances={},
+            mempool_depth=1, peer_count=5, n_connections=2, wallet_balances={},
         )
 
     resp = client.get("/api/snapshots?since=0")
@@ -185,3 +186,36 @@ def test_unknown_route_returns_404(client, fresh_db):
     """/api/unknown returns 404 status."""
     resp = client.get("/api/unknown")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# n_connections field
+# ---------------------------------------------------------------------------
+
+def test_latest_snapshot_includes_n_connections(client, fresh_db):
+    """The n_connections field is returned in /api/snapshot/latest."""
+    import collector.db as db_module
+    from dashboard.api import get_db_path
+
+    now = int(time.time())
+    ts = (now // 600) * 600
+
+    db_module.write_snapshot(
+        db_path=get_db_path(),
+        timestamp=ts,
+        chain_tip=5000,
+        lib="abc123def",
+        mode="Normal",
+        epoch=100,
+        blocks_produced=10,
+        mempool_depth=7,
+        peer_count=15,
+        n_connections=7,
+        wallet_balances={},
+    )
+
+    resp = client.get("/api/snapshot/latest")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert "n_connections" in data
+    assert data["n_connections"] == 7
