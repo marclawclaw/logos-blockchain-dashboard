@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS snapshots (
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
     n_connections INTEGER DEFAULT 0,
-    block_producer TEXT,                  -- Public key of most recent block's producer
     wallet_balances TEXT NOT NULL         -- JSON: {"wallet_name": balance}
 );
 
@@ -59,7 +58,6 @@ def write_snapshot(
     mempool_depth: int,
     peer_count: int,
     n_connections: int,
-    block_producer: Optional[str],
     wallet_balances: dict[str, Optional[int]],
 ) -> None:
     """Write a snapshot using INSERT OR REPLACE (upsert).
@@ -71,10 +69,10 @@ def write_snapshot(
     conn.execute(
         """
         INSERT OR REPLACE INTO snapshots
-            (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, block_producer, wallet_balances)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, wallet_balances)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, block_producer, wallet_json),
+        (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, wallet_json),
     )
     conn.commit()
     conn.close()

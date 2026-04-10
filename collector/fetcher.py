@@ -53,7 +53,6 @@ class FetchResult:
     mempool_depth: int = 0
     peer_count: int = 0
     n_connections: int = 0
-    block_producer: Optional[str] = None  # Public key of most recent block's producer
     wallet_balances: dict[str, Optional[int]] = None  # {name: balance}
 
     def __post_init__(self):
@@ -235,10 +234,6 @@ def fetch_all(base_url: str, wallet_names: list[tuple[str, str]]) -> FetchResult
     if net:
         result.peer_count = net.n_peers
         result.n_connections = net.n_connections
-
-    # Fetch block producer from the most recent block
-    if result.epoch:
-        result.block_producer = fetch_latest_block(base_url, result.epoch)
 
     mempool = fetch_mempool_metrics(base_url)
     if mempool:
