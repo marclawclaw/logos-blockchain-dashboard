@@ -215,21 +215,30 @@ All time-series data rendered as **line charts** using Chart.js. One chart per m
 
 **Feature:** Time Scale Selector
 
-The user can choose the time window displayed in the historical charts.
+The user selects a time window for the historical charts. The live panel (5-second refresh) is completely independent and always shows the latest node data regardless of the selected window.
 
-**Options:** `1h` | `1d` | `1w` | `1m` | `Max`
-- `1h` = last 1 hour
-- `1d` = last 24 hours (default)
-- `1w` = last 168 hours (7 days)
-- `1m` = last 720 hours (30 days)
-- `Max` = all available data (up to 90 days)
+**Options:**
+
+| Button | `hours` param | Meaning |
+|--------|--------------|---------|
+| `1h`   | `1`          | Last 1 hour |
+| `1d`   | `24`         | Last 24 hours (default) |
+| `1w`   | `168`        | Last 168 hours (7 days) |
+| `1m`   | `720`        | Last 720 hours (30 days) |
+| `Max`  | `0`          | All available data (up to 90 days) |
 
 **Implementation:**
-- A button group in the dashboard header (above the charts).
-- Default selection: `1d`.
-- On selection change, the charts re-fetch historical data via `GET /api/snapshots?hours=N` where N is 1, 24, 168, 720, or 0 (for Max, pass `hours=0` to return all available data).
-- Charts re-render with the new data window.
-- The live panel (5s refresh) is **unaffected** by the time scale — it always shows the latest snapshot data regardless of selected window.
+
+- **Location:** A button group rendered in the dashboard header, visually grouped and aligned (e.g., inline after the title or in a dedicated toolbar row).
+- **Default:** `1d` is selected on first load.
+- **Active state:** The selected button has a distinct visual style (e.g., accent background or border) to indicate the current selection.
+- **On selection change:**
+  1. Clear all historical chart data (reset datasets to empty arrays).
+  2. Issue `GET /api/snapshots?hours=N` where N is the numeric value from the table above.
+  3. Re-populate charts with the returned snapshots.
+- **Max (`hours=0`):** The API returns all snapshots regardless of age (up to the 90-day retention limit). The `since` parameter is set to `0` to disable the time filter server-side.
+- **Live panel unaffected:** The 5-second polling loop that fetches from the node APIs (via `/api/proxy/*`) runs independently of the time scale selection. Changing the time scale does not restart or alter that polling loop.
+- **Initial load:** On page load, the default `1d` window is fetched before charts are populated.
 
 ## Testing Strategy
 
