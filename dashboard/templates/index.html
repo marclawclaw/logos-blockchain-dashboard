@@ -219,7 +219,8 @@
   <span id="snapshot-count">0 snapshots</span>
 </footer>
 
-<script>
+<script type="module">
+import { initVisibilityPolling } from '/static/refresh.js';
 // ─────────────────────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────────────────────
@@ -492,19 +493,6 @@ async function refresh() {
   updateLatest(snap);
 }
 
-// Page visible -> 5s polling; hidden -> stop
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (refreshInterval) {
-      clearInterval(refreshInterval);
-      refreshInterval = null;
-    }
-  } else {
-    refresh();
-    refreshInterval = setInterval(refresh, REFRESH_MS);
-  }
-});
-
 // ─────────────────────────────────────────────────────────────
 // Init
 // ─────────────────────────────────────────────────────────────
@@ -552,9 +540,7 @@ async function init() {
   const snap = await fetchLatest();
   updateLatest(snap);
 
-  if (!document.hidden) {
-    refreshInterval = setInterval(refresh, REFRESH_MS);
-  }
+  initVisibilityPolling(refresh, REFRESH_MS);
 }
 
 init();
