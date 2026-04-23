@@ -147,8 +147,8 @@ def test_history_returns_snapshots_since(client, fresh_db):
     assert data["snapshots"][0]["chain_tip"] == 1020
 
 
-def test_history_returns_all_when_since_0(client, fresh_db):
-    """/api/snapshots?since=0 returns all snapshots."""
+def test_snapshots_max_returns_all_via_hours_zero(client, fresh_db):
+    """hours=0 returns all snapshots regardless of age (Max button)."""
     from dashboard.api import get_db_path
     db_path = get_db_path()
 
