@@ -55,7 +55,8 @@ def snapshots():
     from collector.db import get_snapshots_since
     db_path = get_db_path()
     hours = int(request.args.get("hours", 24))
-    since = int(time.time()) - (hours * 3600)
+    # hours=0 means Max — return all available snapshots (no time filter)
+    since = 0 if hours == 0 else int(time.time()) - (hours * 3600)
     rows = get_snapshots_since(db_path, since)
     return jsonify({"snapshots": rows, "count": len(rows)})
 

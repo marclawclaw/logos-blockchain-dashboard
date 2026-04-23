@@ -128,12 +128,44 @@
 
     /* Refresh indicator */
     #refresh-info { font-size: 12px; color: var(--muted); }
+
+    /* Time scale selector */
+    .timescale-group {
+      display: flex;
+      gap: 4px;
+    }
+    .timescale-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 8px;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .timescale-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .timescale-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d1117;
+    }
   </style>
 </head>
 <body>
 
 <header>
   <h1>🟢 Logos Node Observer</h1>
+  <div class="timescale-group">
+    <button class="timescale-btn active" data-scale="1d">1d</button>
+    <button class="timescale-btn" data-scale="1w">1w</button>
+    <button class="timescale-btn" data-scale="1m">1m</button>
+    <button class="timescale-btn" data-scale="Max">Max</button>
+  </div>
   <div id="status">
     <span id="status-dot"></span>
     <span id="status-text">Connecting...</span>
@@ -231,7 +263,9 @@ let lastLiveFetch = null;           // Unix timestamp of last successful node-AP
 const REFRESH_MS = 5000;            // 5 seconds when page is visible
 const API_BASE = '/api';
 // Logos node API proxied via Flask (avoids CORS) (from server-side config)
-const HOURS = 72;                   // Historical window for charts
+// Time scale options: maps button label to hours sent to GET /api/snapshots?hours=N
+const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
+let selectedScale = '1d';          // default time scale
 
 // ─────────────────────────────────────────────────────────────
 // Utilities
@@ -349,14 +383,33 @@ async function fetchLatest() {
   }
 }
 
-async function fetchHistory() {
+async function fetchHistory(hours) {
   try {
-    const r = await fetch(`${API_BASE}/snapshots?hours=${HOURS}`);
+    const r = await fetch(`${API_BASE}/snapshots?hours=${hours}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
   } catch (e) {
     return { snapshots: [] };
   }
+}
+
+function clearCharts() {
+  // Reset all chart datasets to empty — called before re-fetching on time scale change
+  for (const chart of Object.values(charts)) {
+    if (!chart) continue;
+    for (const ds of chart.data.datasets) {
+      ds.data = [];
+    }
+    chart.data.labels = [];
+    chart.update('none');
+  }
+}
+
+async function loadHistory(scale) {
+  clearCharts();
+  const hours = TIME_SCALES[scale] ?? 24;
+  const data = await fetchHistory(hours);
+  updateHistory(data);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -534,13 +587,26 @@ async function init() {
   charts.mempool = makeChart('chart-mempool', 'Pending Tx', '#d29922');
   charts.peers = makeChart('chart-peers', 'Peers', '#bc8cff');
 
-  // Load history first, then start polling
-  const hist = await fetchHistory();
-  updateHistory(hist);
+  // Load history first (default 1d), then start polling
+  await loadHistory('1d');
   const snap = await fetchLatest();
   updateLatest(snap);
 
-  initVisibilityPolling(refresh, REFRESH_MS);
+  if (!document.hidden) {
+    refreshInterval = setInterval(refresh, REFRESH_MS);
+  }
+
+  // Wire up time scale selector buttons
+  document.querySelectorAll('.timescale-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const scale = btn.dataset.scale;
+      if (scale === selectedScale) return;
+      selectedScale = scale;
+      document.querySelectorAll('.timescale-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadHistory(scale);
+    });
+  });
 }
 
 init();
