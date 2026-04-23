@@ -161,7 +161,6 @@
 <header>
   <h1>🟢 Logos Node Observer</h1>
   <div class="timescale-group">
-    <button class="timescale-btn" data-scale="1h">1h</button>
     <button class="timescale-btn active" data-scale="1d">1d</button>
     <button class="timescale-btn" data-scale="1w">1w</button>
     <button class="timescale-btn" data-scale="1m">1m</button>
@@ -265,7 +264,7 @@ const REFRESH_MS = 5000;            // 5 seconds when page is visible
 const API_BASE = '/api';
 // Logos node API proxied via Flask (avoids CORS) (from server-side config)
 // Time scale options: maps button label to hours sent to GET /api/snapshots?hours=N
-const TIME_SCALES = { '1h': 1, '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
+const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
 let selectedScale = '1d';          // default time scale
 
 // ─────────────────────────────────────────────────────────────

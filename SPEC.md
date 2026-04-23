@@ -13,7 +13,7 @@
 2. Operator closes tab → collector stores 10-min snapshots
 3. Operator returns days later → sees historical graphs of all metrics
 4. Operator deploys to new node → config auto-detected from `user_config.yaml`
-5. Operator selects a time scale (1h | 1d | 1w | 1m | Max) → historical charts re-fetch and re-render for that window
+5. Operator selects a time scale (1d | 1w | 1m | Max) → historical charts re-fetch and re-render for that window
 
 ## Tech Stack
 
@@ -221,7 +221,7 @@ The user selects a time window for the historical charts. The live panel (5-seco
 
 | Button | `hours` param | Meaning |
 |--------|--------------|---------|
-| `1h`   | `1`          | Last 1 hour |
+ |
 | `1d`   | `24`         | Last 24 hours (default) |
 | `1w`   | `168`        | Last 168 hours (7 days) |
 | `1m`   | `720`        | Last 720 hours (30 days) |
@@ -298,7 +298,7 @@ The user selects a time window for the historical charts. The live panel (5-seco
 - [ ] Malformed API responses are logged and treated as endpoint failures, not crashes
 - [ ] First run (0 snapshots): dashboard shows "Collecting data" banner and "—" for current values
 - [ ] Historical graphs display all available data up to 90 days; empty charts when no data
-- [ ] Time scale selector (1h | 1d | 1w | 1m | Max) filters historical chart data; default is 1d; live panel unaffected
+- [ ] Time scale selector (1d | 1w | 1m | Max) filters historical chart data; default is 1d; live panel unaffected
 - [ ] Timestamps stored as UTC Unix epoch; rendered in browser's local timezone
 - [ ] Snapshot retention: 90 days — older rows pruned on startup and after each write
 - [ ] README has clear setup instructions for a new node operator

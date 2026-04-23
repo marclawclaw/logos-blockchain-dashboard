@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a time scale selector button group to the dashboard header. When the user selects a time scale (1h / 1d / 1w / 1m / Max), the historical charts clear and re-fetch from `GET /api/snapshots?hours=N`. The live panel (5s refresh) is unaffected.
+Add a time scale selector button group to the dashboard header. When the user selects a time scale (1d / 1w / 1m / Max), the historical charts clear and re-fetch from `GET /api/snapshots?hours=N`. The live panel (5s refresh) is unaffected.
 
 ## What Exists
 
@@ -25,14 +25,14 @@ Add a time scale selector button group to the dashboard header. When the user se
 
 ### State additions
 ```js
-const TIME_SCALES = { '1h': 1, '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
+const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
 let selectedScale = '1d';  // default
 ```
 
 ### Button group HTML (in header)
 ```html
 <div class="timescale-group">
-  <button class="timescale-btn active" data-scale="1h">1h</button>
+  <button class="timescale-btn active" 
   <button class="timescale-btn active" data-scale="1d">1d</button>
   <button class="timescale-btn" data-scale="1w">1w</button>
   <button class="timescale-btn" data-scale="1m">1m</button>
@@ -44,7 +44,6 @@ let selectedScale = '1d';  // default
 1. `clearCharts()` — reset all chart datasets to empty arrays + `chart.update('none')`
 2. `loadHistory(scale)` — clearCharts() → fetch `${API_BASE}/snapshots?hours=${TIME_SCALES[scale]}` → `updateHistory(data)`
 3. Click handlers on `.timescale-btn` — update `selectedScale`, toggle `.active` class, call `loadHistory(scale)`
-4. Remove `const HOURS = 72;` — replace with `TIME_SCALES` map
 5. On init: call `loadHistory('1d')` instead of `fetchHistory()`
 
 ### updateHistory() changes
