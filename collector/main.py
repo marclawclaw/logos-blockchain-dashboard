@@ -29,6 +29,7 @@ def main() -> None:
 
     run_p = sub.add_parser("run", help="Run the collector loop")
     run_p.add_argument("--daemon", action="store_true", help="Run as background daemon")
+    run_p.add_argument("--once", action="store_true", help="Run one collection and exit")
     run_p.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     run_p.add_argument("--db", default="data/snapshots.db", help="Path to SQLite DB")
 
@@ -46,10 +47,10 @@ def main() -> None:
 
     elif args.command == "run":
         config = load(args.config)
-        _run(config, args.db, daemon=args.daemon)
+        _run(config, args.db, daemon=args.daemon, once=args.once)
 
 
-def _run(config: Config, db_path: str, daemon: bool = False) -> None:
+def _run(config: Config, db_path: str, daemon: bool = False, once: bool = False) -> None:
     interval_secs = config.interval_minutes * 60
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -58,6 +59,11 @@ def _run(config: Config, db_path: str, daemon: bool = False) -> None:
 
     # Prune old snapshots on startup
     prune_old_snapshots(db_path)
+
+    if once:
+        logger.info("Collector running once — DB at %s", db_path)
+        _collect_and_store(config, db_path)
+        return
 
     # Handle shutdown gracefully
     running = True
