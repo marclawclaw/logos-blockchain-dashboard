@@ -235,6 +235,21 @@
   </div>
 
   <div class="card chart-card">
+    <h2>CPU Temperature (°C)</h2>
+    <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <h2>CPU Usage (%)</h2>
+    <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
+    <h2>Memory Used (%) &amp; Load</h2>
+    <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
+  </div>
+
+  <div class="card chart-card">
     <div class="card-title">Wallet Balances</div>
     <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
   </div>
@@ -529,6 +544,15 @@ function updateHistory(data) {
     if (charts.tip) pushPoint(charts.tip, ts, snap.chain_tip);
     if (charts.mempool) pushPoint(charts.mempool, ts, snap.mempool_depth);
     if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
+    if (charts.temp && snap.cpu_temp != null) pushPoint(charts.temp, ts, snap.cpu_temp);
+    if (charts.cpu && snap.cpu_pct != null) pushPoint(charts.cpu, ts, snap.cpu_pct);
+    if (charts.mem && (snap.mem_pct != null || snap.load1 != null)) {
+      charts.mem.data.labels.push(localTime(ts));
+      charts.mem.data.datasets[0].data.push(snap.mem_pct);
+      charts.mem.data.datasets[1].data.push(snap.load1);
+      if (charts.mem.data.labels.length > 200) { charts.mem.data.labels.shift(); charts.mem.data.datasets[0].data.shift(); charts.mem.data.datasets[1].data.shift(); }
+      charts.mem.update('none');
+    }
     let balances = {};
     try { balances = JSON.parse(snap.wallet_balances || '{}'); } catch (_) {}
     for (const [name, val] of Object.entries(balances)) {
@@ -586,6 +610,25 @@ async function init() {
   charts.tip = makeChart('chart-tip', 'Chain Tip', '#58a6ff');
   charts.mempool = makeChart('chart-mempool', 'Pending Tx', '#d29922');
   charts.peers = makeChart('chart-peers', 'Peers', '#bc8cff');
+  charts.temp = makeChart('chart-temp', 'CPU Temp', '#f85149');
+  charts.cpu = makeChart('chart-cpu', 'CPU %', '#3fb950');
+  // mem chart: two lines (mem % + load1)
+  charts.mem = new Chart(document.getElementById('chart-mem').getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: [
+      { label: 'Mem %', data: [], borderColor: '#d29922', backgroundColor: '#d2992222', borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: true },
+      { label: 'Load (1m)', data: [], borderColor: '#58a6ff', backgroundColor: '#58a6ff22', borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false, yAxisID: 'y1' },
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
+      scales: {
+        x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
+        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' }, beginAtZero: true, position: 'left' },
+        y1: { grid: { display: false }, ticks: { color: '#8b949e' }, beginAtZero: true, position: 'right' },
+      },
+    },
+  });
 
   // Load history first (default 1d), then start polling
   await loadHistory('1d');

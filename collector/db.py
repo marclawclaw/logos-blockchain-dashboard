@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
     mempool_depth INTEGER DEFAULT 0,
     peer_count INTEGER DEFAULT 0,
     n_connections INTEGER DEFAULT 0,
+    cpu_temp REAL,                       -- hottest thermal zone, °C
+    cpu_pct REAL,                        -- CPU utilisation %
+    mem_pct REAL,                        -- memory used %
+    load1 REAL,                          -- 1-minute load average
     wallet_balances TEXT NOT NULL         -- JSON: {"wallet_name": balance}
 );
 
@@ -39,10 +43,23 @@ def get_connection(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+HOST_COLUMNS = {"cpu_temp": "REAL", "cpu_pct": "REAL", "mem_pct": "REAL", "load1": "REAL"}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add host-metric columns to an existing snapshots table if missing."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(snapshots)")}
+    for col, typ in HOST_COLUMNS.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {typ}")
+            logger.info("Migrated: added column %s", col)
+
+
 def init_db(db_path: str) -> None:
-    """Create the database and schema."""
+    """Create the database and schema (and migrate host columns if needed)."""
     conn = get_connection(db_path)
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     conn.close()
     logger.info("Database initialised at %s", db_path)
@@ -59,6 +76,10 @@ def write_snapshot(
     peer_count: int,
     n_connections: int,
     wallet_balances: dict[str, Optional[int]],
+    cpu_temp: Optional[float] = None,
+    cpu_pct: Optional[float] = None,
+    mem_pct: Optional[float] = None,
+    load1: Optional[float] = None,
 ) -> None:
     """Write a snapshot using INSERT OR REPLACE (upsert).
 
@@ -69,10 +90,12 @@ def write_snapshot(
     conn.execute(
         """
         INSERT OR REPLACE INTO snapshots
-            (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, wallet_balances)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections,
+             cpu_temp, cpu_pct, mem_pct, load1, wallet_balances)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections, wallet_json),
+        (timestamp, chain_tip, lib, mode, epoch, mempool_depth, peer_count, n_connections,
+         cpu_temp, cpu_pct, mem_pct, load1, wallet_json),
     )
     conn.commit()
     conn.close()
