@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import load, Config
 from .db import init_db, write_snapshot, prune_old_snapshots, get_latest_snapshot
 from .fetcher import fetch_all
+from .host import read_host_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,9 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         logger.warning("All APIs failed — skipping snapshot for this interval")
         return
 
+    # Host metrics (temp/CPU/RAM/load) — independent of node API
+    host = read_host_metrics()
+
     # Truncate to 10-min window
     now = int(time.time())
     timestamp = (now // 600) * 600
@@ -130,16 +134,23 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         peer_count=result.peer_count,
         n_connections=result.n_connections,
         wallet_balances=result.wallet_balances,
+        cpu_temp=host.cpu_temp,
+        cpu_pct=host.cpu_pct,
+        mem_pct=host.mem_pct,
+        load1=host.load1,
     )
 
     # Prune after write
     prune_old_snapshots(db_path)
 
     logger.info(
-        "Snapshot stored: tip=%s, peers=%s, mempool=%s, wallets=%s",
+        "Snapshot stored: tip=%s, peers=%s, mempool=%s, temp=%s°C, cpu=%s%%, mem=%s%%, wallets=%s",
         result.chain_tip,
         result.peer_count,
         result.mempool_depth,
+        host.cpu_temp,
+        host.cpu_pct,
+        host.mem_pct,
         result.wallet_balances,
     )
 
