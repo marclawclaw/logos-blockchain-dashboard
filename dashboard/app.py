@@ -16,13 +16,17 @@ def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
 
-    # Load the Logos node URL once at startup
+    # Load the Logos node URL once at startup.
+    # Use an absolute path to config.yaml (project root) so it resolves regardless
+    # of CWD — main() does os.chdir(dashboard_dir) before create_app() runs.
     try:
         from collector.config import load
-        cfg = load()
+        project_root = Path(__file__).parent.parent
+        cfg = load(str(project_root / "config.yaml"))
         node_url = cfg.axum_url
-    except Exception:
-        node_url = "http://localhost:38437"
+    except Exception as e:
+        logger.warning("Config load failed, using fallback node URL: %s", e)
+        node_url = "http://127.0.0.1:8080"
 
     # Proxy: browser calls /api/proxy/<path> → Flask forwards to Logos node
     # This avoids CORS since browser always talks to the same origin (port 8282)
