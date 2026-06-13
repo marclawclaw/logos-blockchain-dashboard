@@ -280,6 +280,12 @@ const API_BASE = '/api';
 // Logos node API proxied via Flask (avoids CORS) (from server-side config)
 // Time scale options: maps button label to hours sent to GET /api/snapshots?hours=N
 const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
+// name -> address, for live wallet-balance polling via the node proxy.
+// Keep in sync with config.local.yaml wallets and the wallet-<name> card ids.
+const WALLETS = {
+  voucher: '966ff8f26c93914c9e9ed5c4b8a36f3b11c4544fb10dd4cd688599bc0f82a928',
+  funding: 'f67a3ba0712d9d078a8f0980188b367056ffee0092df196f54cbb8f24ce1b916',
+};
 let selectedScale = '1d';          // default time scale
 
 // ─────────────────────────────────────────────────────────────
@@ -383,6 +389,16 @@ async function fetchLatest() {
 
     lastLiveFetch = Math.floor(Date.now() / 1000);
 
+    // Wallet balances are not in the node info endpoints — pull each wallet
+    // via the proxy. Failures are non-fatal (a wallet may be unknown to the node).
+    const balances = {};
+    await Promise.all(Object.entries(WALLETS).map(async ([name, addr]) => {
+      try {
+        const r = await fetch(`/api/proxy/wallet/${addr}/balance`);
+        if (r.ok) { const b = await r.json(); if (b && b.balance != null) balances[name] = b.balance; }
+      } catch (_) {}
+    }));
+
     return {
       _ts: lastLiveFetch,
       chain_tip: info.height,
@@ -392,6 +408,7 @@ async function fetchLatest() {
       peer_count: net.n_peers,
       n_connections: net.n_connections,
       mempool_depth: mem.pending_items,
+      wallet_balances: JSON.stringify(balances),
     };
   } catch (e) {
     return null;
@@ -575,7 +592,7 @@ async function refresh() {
 // ─────────────────────────────────────────────────────────────
 async function init() {
   // Seed wallet chart with one dataset per known wallet
-  const walletNames = ['voucher', 'funding'];
+  const walletNames = Object.keys(WALLETS);
   const walletColors = ['#58a6ff', '#3fb950'];
   charts.producers = new Chart(document.getElementById('chart-producers').getContext('2d'), {
     type: 'bar',
