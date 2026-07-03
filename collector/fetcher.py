@@ -95,18 +95,43 @@ def _post(base_url: str, path: str, data: dict, timeout: int = 10) -> Optional[d
         return None
 
 
+def _normalize_mode(mode) -> str:
+    """Normalize the node's mode field to a display string.
+
+    Node 0.1.x returned a plain string ("Bootstrapping"). Node 0.2.0 returns an
+    object keyed by the mode, e.g. {"Started": "Bootstrapping"} or {"Online": null}.
+    Prefer the inner value when it is itself a mode name, else the outer key.
+    """
+    if mode is None:
+        return "unknown"
+    if isinstance(mode, str):
+        return mode
+    if isinstance(mode, dict) and mode:
+        key, value = next(iter(mode.items()))
+        return value if isinstance(value, str) and value else key
+    return str(mode)
+
+
 def fetch_cryptarchia_info(base_url: str) -> Optional[CryptarchiaInfo]:
-    """Fetch consensus state from /cryptarchia/info."""
+    """Fetch consensus state from /cryptarchia/info.
+
+    Handles both the 0.1.x flat shape and the 0.2.0 shape, which nests the
+    consensus fields under "cryptarchia_info" and moves "mode" to the top level.
+    """
     data = _get(base_url, "/cryptarchia/info")
     if data is None:
         return None
     try:
+        # 0.2.0 nests consensus fields under "cryptarchia_info"; 0.1.x is flat.
+        info = data.get("cryptarchia_info", data)
+        # "mode" sits at the top level in 0.2.0, inside the flat body in 0.1.x.
+        mode = data["mode"] if "mode" in data else info.get("mode")
         return CryptarchiaInfo(
-            lib=data["lib"],
-            tip=data["tip"],
-            slot=int(data["slot"]),
-            height=int(data["height"]),
-            mode=str(data.get("mode", "unknown")),
+            lib=info["lib"],
+            tip=info["tip"],
+            slot=int(info["slot"]),
+            height=int(info["height"]),
+            mode=_normalize_mode(mode),
         )
     except (KeyError, TypeError, ValueError) as e:
         logger.warning("/cryptarchia/info returned unexpected structure: %s (%s)", data, e)
@@ -184,7 +209,8 @@ def fetch_latest_block(base_url: str, slot: int) -> Optional[str]:
     Returns the leader's public key as a hex string, or None on failure.
     The Logos block structure: Block.header.proof_of_leadership.leader_key
     """
-    url = f"{base_url.rstrip('/')}/cryptarchia/blocks?slot_from={slot}&to_slot={slot}"
+    # 0.2.0 names the upper bound "slot_to" (0.1.x used "to_slot").
+    url = f"{base_url.rstrip('/')}/cryptarchia/blocks?slot_from={slot}&slot_to={slot}"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 400:

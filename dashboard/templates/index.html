@@ -372,6 +372,18 @@ function pushPoint(chart, timestamp, value) {
 // ─────────────────────────────────────────────────────────────
 // API
 // ─────────────────────────────────────────────────────────────
+// Node 0.1.x returned mode as a string ("Bootstrapping"); 0.2.0 returns an
+// object like {"Started":"Bootstrapping"} or {"Online":null}. Reduce to a name.
+function normalizeMode(mode) {
+  if (mode == null) return 'unknown';
+  if (typeof mode === 'string') return mode;
+  if (typeof mode === 'object') {
+    const [key, value] = Object.entries(mode)[0] || ['unknown', null];
+    return (typeof value === 'string' && value) ? value : key;
+  }
+  return String(mode);
+}
+
 async function fetchLatest() {
   // Poll the Logos node APIs directly for live data
   try {
@@ -383,7 +395,11 @@ async function fetchLatest() {
 
     if (!infoRes.ok || !netRes.ok || !memRes.ok) throw new Error('Node API error');
 
-    const info = await infoRes.json();
+    const infoRaw = await infoRes.json();
+    // Node 0.2.0 nests consensus fields under "cryptarchia_info" and moves
+    // "mode" to the top level; 0.1.x was flat. Support both.
+    const info = infoRaw.cryptarchia_info || infoRaw;
+    const modeVal = normalizeMode(infoRaw.mode != null ? infoRaw.mode : info.mode);
     const net = await netRes.json();
     const mem = await memRes.json();
 
@@ -402,7 +418,7 @@ async function fetchLatest() {
     return {
       _ts: lastLiveFetch,
       chain_tip: info.height,
-      mode: info.mode,
+      mode: modeVal,
       epoch: info.slot,
       lib: info.lib,
       peer_count: net.n_peers,
