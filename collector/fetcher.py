@@ -115,17 +115,28 @@ def _normalize_mode(mode) -> str:
 def fetch_cryptarchia_info(base_url: str) -> Optional[CryptarchiaInfo]:
     """Fetch consensus state from /cryptarchia/info.
 
-    Handles both the 0.1.x flat shape and the 0.2.0 shape, which nests the
-    consensus fields under "cryptarchia_info" and moves "mode" to the top level.
+    Handles the 0.1.x flat shape, the 0.2.0 shape (nests consensus fields
+    under "cryptarchia_info", moves "mode" to the top level), and the 0.2.3
+    shape (renames "mode" to "state", a plain string inside "cryptarchia_info",
+    and adds a top-level "phase", e.g. "InitialBlockDownload").
     """
     data = _get(base_url, "/cryptarchia/info")
     if data is None:
         return None
     try:
-        # 0.2.0 nests consensus fields under "cryptarchia_info"; 0.1.x is flat.
+        # 0.2.0+ nests consensus fields under "cryptarchia_info"; 0.1.x is flat.
         info = data.get("cryptarchia_info", data)
-        # "mode" sits at the top level in 0.2.0, inside the flat body in 0.1.x.
-        mode = data["mode"] if "mode" in data else info.get("mode")
+        # "mode" sits at the top level in 0.2.0, inside the flat body in 0.1.x,
+        # renamed to "state" (inside cryptarchia_info) in 0.2.3. Fall back to
+        # the top-level "phase" 0.2.3 also reports.
+        if "mode" in data:
+            mode = data["mode"]
+        elif info.get("mode") is not None:
+            mode = info.get("mode")
+        elif info.get("state") is not None:
+            mode = info.get("state")
+        else:
+            mode = data.get("phase")
         return CryptarchiaInfo(
             lib=info["lib"],
             tip=info["tip"],

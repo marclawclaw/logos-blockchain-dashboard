@@ -146,6 +146,42 @@ def test_fetch_cryptarchia_info_v020_nested_shape():
     assert info.mode == "Bootstrapping"
 
 
+def test_fetch_cryptarchia_info_v023_state_shape():
+    """Node 0.2.3 renames mode to "state" (a plain string) and adds top-level "phase"."""
+    from collector.fetcher import fetch_cryptarchia_info
+
+    payload = {
+        "cryptarchia_info": {
+            "lib": "ee55", "lib_slot": 0, "tip": "ff66",
+            "slot": 500136, "height": 16804, "state": "Bootstrapping",
+        },
+        "phase": "InitialBlockDownload",
+    }
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json(payload)):
+        info = fetch_cryptarchia_info("http://localhost:38437")
+    assert info is not None
+    assert info.lib == "ee55"
+    assert info.height == 16804
+    assert info.mode == "Bootstrapping"
+
+
+def test_fetch_cryptarchia_info_v023_falls_back_to_phase():
+    """When cryptarchia_info has no state, fall back to the top-level "phase"."""
+    from collector.fetcher import fetch_cryptarchia_info
+
+    payload = {
+        "cryptarchia_info": {
+            "lib": "aa99", "lib_slot": 0, "tip": "bb88",
+            "slot": 1, "height": 0,
+        },
+        "phase": "InitialBlockDownload",
+    }
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json(payload)):
+        info = fetch_cryptarchia_info("http://localhost:38437")
+    assert info is not None
+    assert info.mode == "InitialBlockDownload"
+
+
 def test_fetch_cryptarchia_info_v012_flat_shape():
     """Node 0.1.x flat shape still parses (rollback compatibility)."""
     from collector.fetcher import fetch_cryptarchia_info

@@ -397,9 +397,15 @@ async function fetchLatest() {
 
     const infoRaw = await infoRes.json();
     // Node 0.2.0 nests consensus fields under "cryptarchia_info" and moves
-    // "mode" to the top level; 0.1.x was flat. Support both.
+    // "mode" to the top level; 0.1.x was flat. 0.2.3 renames it to "state"
+    // (a plain string) inside cryptarchia_info and adds a top-level "phase"
+    // ("InitialBlockDownload", etc). Support all three.
     const info = infoRaw.cryptarchia_info || infoRaw;
-    const modeVal = normalizeMode(infoRaw.mode != null ? infoRaw.mode : info.mode);
+    const rawMode = infoRaw.mode != null ? infoRaw.mode
+      : info.mode != null ? info.mode
+      : info.state != null ? info.state
+      : infoRaw.phase;
+    const modeVal = normalizeMode(rawMode);
     const net = await netRes.json();
     const mem = await memRes.json();
 

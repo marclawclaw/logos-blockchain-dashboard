@@ -17,12 +17,17 @@ def create_app() -> Flask:
     app.config["JSON_SORT_KEYS"] = False
 
     # Load the Logos node URL once at startup.
-    # Use an absolute path to config.yaml (project root) so it resolves regardless
-    # of CWD — main() does os.chdir(dashboard_dir) before create_app() runs.
+    # Use an absolute path (project root) so it resolves regardless of CWD —
+    # main() does os.chdir(dashboard_dir) before create_app() runs. Prefer the
+    # untracked config.local.yaml (per-machine overrides, e.g. node_config_path)
+    # over the tracked config.yaml template, matching the collector CLI's
+    # `--config config.local.yaml` convention.
     try:
         from collector.config import load
         project_root = Path(__file__).parent.parent
-        cfg = load(str(project_root / "config.yaml"))
+        local_config = project_root / "config.local.yaml"
+        config_path = local_config if local_config.exists() else project_root / "config.yaml"
+        cfg = load(str(config_path))
         node_url = cfg.axum_url
     except Exception as e:
         logger.warning("Config load failed, using fallback node URL: %s", e)
