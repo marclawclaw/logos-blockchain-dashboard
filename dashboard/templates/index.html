@@ -332,9 +332,15 @@ let selectedScale = '1d';          // default time scale
 // ─────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────
-function localTime(epochMs) {
-  if (!epochMs) return '—';
-  return new Date(epochMs * 1000).toLocaleTimeString();
+// Chart x-axis label, e.g. "6 Oct 14:05:23". Includes the date so multi-day
+// scales are readable, and seconds so labels stay unique: pushPoint() dedupes
+// on the label, and live points arrive every few seconds.
+function localTime(epochSec) {
+  if (!epochSec) return '—';
+  const d = new Date(epochSec * 1000);
+  const date = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return `${date} ${time}`;
 }
 
 function setUnknown(el, text) {
