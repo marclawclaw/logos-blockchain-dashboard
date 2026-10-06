@@ -180,6 +180,7 @@
     <button class="timescale-btn" data-scale="1w">1w</button>
     <button class="timescale-btn" data-scale="1m">1m</button>
     <button class="timescale-btn" data-scale="Max">Max</button>
+    <button class="timescale-btn" id="ip-toggle" title="Mask IP addresses (safe for screenshots)">Show IPs</button>
   </div>
   <div id="status">
     <span id="status-dot"></span>
@@ -648,17 +649,39 @@ const BLEND_STATUS_LABELS = {
   active: 'Active', pending: 'Pending activation', inactive: 'Inactive',
   withdrawn: 'Withdrawn', not_declared: 'Not declared',
 };
+const IP_PREF_KEY = 'showIps';
+// IPs are masked by default so screenshots are safe; the toggle is remembered per browser.
+let showIps = false;
+try { showIps = localStorage.getItem(IP_PREF_KEY) === '1'; } catch (_) {}
+let lastBlend = null;
+
+function fmtIp(ip) {
+  if (!ip) return ip;
+  return showIps ? ip : '•••.•••.•••.•••';
+}
+
+function setShowIps(on) {
+  showIps = on;
+  try { localStorage.setItem(IP_PREF_KEY, on ? '1' : '0'); } catch (_) {}
+  const btn = document.getElementById('ip-toggle');
+  btn.textContent = on ? 'Hide IPs' : 'Show IPs';
+  btn.classList.toggle('active', on);
+  if (lastBlend) renderBlend(lastBlend);
+}
 
 async function refreshBlend() {
-  let data;
   try {
     const r = await fetch(`${API_BASE}/blend/status`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    data = await r.json();
+    lastBlend = await r.json();
   } catch (e) {
     setUnknown(document.getElementById('blend-status'), 'unavailable');
     return;
   }
+  renderBlend(lastBlend);
+}
+
+function renderBlend(data) {
   const node = data.node || {};
   const net = data.network || {};
 
@@ -673,15 +696,15 @@ async function refreshBlend() {
   setVal(document.getElementById('blend-epochs'),
     node.declared ? `${node.created ?? '—'} / ${node.active ?? '—'}` : '—');
   setVal(document.getElementById('blend-reg-ip'),
-    node.registered_ip ? `${node.registered_ip}:${node.registered_port}` : null);
+    node.registered_ip ? `${fmtIp(node.registered_ip)}:${node.registered_port}` : null);
   const pubEl = document.getElementById('blend-pub-ip');
-  setVal(pubEl, node.public_ip);
+  setVal(pubEl, fmtIp(node.public_ip));
   pubEl.classList.toggle('ok', node.ip_match === true);
   pubEl.classList.toggle('bad', node.ip_match === false);
 
   const warn = document.getElementById('blend-ip-warning');
   if (node.ip_match === false) {
-    warn.textContent = `Public IP changed: declaration advertises ${node.registered_ip} but this host is now ${node.public_ip}. ` +
+    warn.textContent = `Public IP changed: declaration advertises ${fmtIp(node.registered_ip)} but this host is now ${fmtIp(node.public_ip)}. ` +
       'Peers cannot reach the Blend listener — re-declare with the new locator.';
     warn.style.display = 'block';
   } else {
@@ -771,16 +794,18 @@ async function init() {
   if (!document.hidden) {
     refreshInterval = setInterval(refresh, REFRESH_MS);
   }
+  setShowIps(showIps);
+  document.getElementById('ip-toggle').addEventListener('click', () => setShowIps(!showIps));
   refreshBlend();
   setInterval(() => { if (!document.hidden) refreshBlend(); }, BLEND_REFRESH_MS);
 
   // Wire up time scale selector buttons
-  document.querySelectorAll('.timescale-btn').forEach(btn => {
+  document.querySelectorAll('.timescale-btn[data-scale]').forEach(btn => {
     btn.addEventListener('click', () => {
       const scale = btn.dataset.scale;
       if (scale === selectedScale) return;
       selectedScale = scale;
-      document.querySelectorAll('.timescale-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.timescale-btn[data-scale]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       loadHistory(scale);
     });
