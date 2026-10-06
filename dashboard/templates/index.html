@@ -116,6 +116,21 @@
     }
     .wallet-name { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 
+    /* Blend */
+    .pill {
+      display: inline-block; padding: 1px 8px; border-radius: 10px;
+      font-size: 12px; font-weight: 600; border: 1px solid var(--border); color: var(--muted);
+    }
+    .pill.active { color: var(--green); border-color: var(--green); }
+    .pill.pending { color: var(--accent); border-color: var(--accent); }
+    .pill.inactive, .pill.withdrawn { color: var(--amber); border-color: var(--amber); }
+    .metric-value.ok { color: var(--green); }
+    .metric-value.bad { color: var(--red); }
+    .blend-warning {
+      display: none; margin-top: 8px; padding: 6px 8px; border-radius: 4px;
+      border: 1px solid var(--red); color: var(--red); font-size: 12px;
+    }
+
     /* Footer */
     footer {
       padding: 12px 24px;
@@ -222,6 +237,24 @@
     <div class="wallet-balance" id="wallet-pow">—</div>
   </div>
 
+  <!-- Blend Network -->
+  <div class="card">
+    <div class="card-title">Blend — This Node</div>
+    <div class="metric"><span class="metric-label">Core node</span><span class="metric-value" id="blend-status">—</span></div>
+    <div class="metric"><span class="metric-label">Declared / active epoch</span><span class="metric-value" id="blend-epochs">—</span></div>
+    <div class="metric"><span class="metric-label">Registered IP</span><span class="metric-value" id="blend-reg-ip">—</span></div>
+    <div class="metric"><span class="metric-label">Current public IP</span><span class="metric-value" id="blend-pub-ip">—</span></div>
+    <div class="blend-warning" id="blend-ip-warning"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Blend — Network</div>
+    <div class="metric"><span class="metric-label">Core nodes (declared)</span><span class="metric-value" id="blend-total">—</span></div>
+    <div class="metric"><span class="metric-label">Active / pending</span><span class="metric-value" id="blend-active">—</span></div>
+    <div class="metric"><span class="metric-label">Inactive / withdrawn</span><span class="metric-value" id="blend-inactive">—</span></div>
+    <div class="metric"><span class="metric-label">Distinct hosts</span><span class="metric-value" id="blend-hosts">—</span></div>
+    <div class="metric"><span class="metric-label">Latest epoch</span><span class="metric-value" id="blend-epoch">—</span></div>
+  </div>
+
   <!-- Charts -->
   <div class="card chart-card">
     <div class="card-title">Chain Tip Height</div>
@@ -285,6 +318,7 @@ const API_BASE = '/api';
 // Logos node API proxied via Flask (avoids CORS) (from server-side config)
 // Time scale options: maps button label to hours sent to GET /api/snapshots?hours=N
 const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
+const BLEND_REFRESH_MS = 60000;     // declarations change per epoch, no need to poll fast
 // name -> address, for live wallet-balance polling via the node proxy.
 // Keep in sync with config.local.yaml wallets and the wallet-<name> card ids.
 const WALLETS = {
@@ -608,6 +642,60 @@ function updateHistory(data) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Blend Network
+// ─────────────────────────────────────────────────────────────
+const BLEND_STATUS_LABELS = {
+  active: 'Active', pending: 'Pending activation', inactive: 'Inactive',
+  withdrawn: 'Withdrawn', not_declared: 'Not declared',
+};
+
+async function refreshBlend() {
+  let data;
+  try {
+    const r = await fetch(`${API_BASE}/blend/status`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    data = await r.json();
+  } catch (e) {
+    setUnknown(document.getElementById('blend-status'), 'unavailable');
+    return;
+  }
+  const node = data.node || {};
+  const net = data.network || {};
+
+  const statusEl = document.getElementById('blend-status');
+  statusEl.innerHTML = '';
+  const pill = document.createElement('span');
+  pill.className = `pill ${node.status}`;
+  pill.textContent = BLEND_STATUS_LABELS[node.status] || node.status;
+  if (node.status === 'pending' && node.activates_at != null) pill.textContent += ` (epoch ${node.activates_at})`;
+  statusEl.appendChild(pill);
+
+  setVal(document.getElementById('blend-epochs'),
+    node.declared ? `${node.created ?? '—'} / ${node.active ?? '—'}` : '—');
+  setVal(document.getElementById('blend-reg-ip'),
+    node.registered_ip ? `${node.registered_ip}:${node.registered_port}` : null);
+  const pubEl = document.getElementById('blend-pub-ip');
+  setVal(pubEl, node.public_ip);
+  pubEl.classList.toggle('ok', node.ip_match === true);
+  pubEl.classList.toggle('bad', node.ip_match === false);
+
+  const warn = document.getElementById('blend-ip-warning');
+  if (node.ip_match === false) {
+    warn.textContent = `Public IP changed: declaration advertises ${node.registered_ip} but this host is now ${node.public_ip}. ` +
+      'Peers cannot reach the Blend listener — re-declare with the new locator.';
+    warn.style.display = 'block';
+  } else {
+    warn.style.display = 'none';
+  }
+
+  setVal(document.getElementById('blend-total'), net.core_nodes);
+  setVal(document.getElementById('blend-active'), `${net.active ?? '—'} / ${net.pending ?? '—'}`);
+  setVal(document.getElementById('blend-inactive'), `${net.inactive ?? '—'} / ${net.withdrawn ?? '—'}`);
+  setVal(document.getElementById('blend-hosts'), net.distinct_hosts);
+  setVal(document.getElementById('blend-epoch'), data.epoch);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Refresh logic
 // ─────────────────────────────────────────────────────────────
 async function refresh() {
@@ -683,6 +771,8 @@ async function init() {
   if (!document.hidden) {
     refreshInterval = setInterval(refresh, REFRESH_MS);
   }
+  refreshBlend();
+  setInterval(() => { if (!document.hidden) refreshBlend(); }, BLEND_REFRESH_MS);
 
   // Wire up time scale selector buttons
   document.querySelectorAll('.timescale-btn').forEach(btn => {

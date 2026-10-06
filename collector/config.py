@@ -50,6 +50,11 @@ class Config:
     wallets: list[Wallet] = field(default_factory=list)
     interval_minutes: int = 10
     database: str = "data/snapshots.db"
+    # Resolved path to the node's user_config.yaml (may not exist).
+    node_config_path: Optional[str] = None
+    # Optional `blend:` overrides for this node's Blend keys (zk_id, provider_id);
+    # by default they are read from the node config.
+    blend: dict = field(default_factory=dict)
 
 
 def expand_path(path: str) -> Path:
@@ -138,4 +143,6 @@ def load(config_path: Optional[str] = None) -> Config:
         wallets=wallets,
         interval_minutes=raw.get("collector", {}).get("interval_minutes", 10),
         database=raw.get("collector", {}).get("database", "data/snapshots.db"),
+        node_config_path=str(node_config_file),
+        blend=raw.get("blend") or {},
     )

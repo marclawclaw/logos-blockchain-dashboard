@@ -29,9 +29,12 @@ def create_app() -> Flask:
         config_path = local_config if local_config.exists() else project_root / "config.yaml"
         cfg = load(str(config_path))
         node_url = cfg.axum_url
+        app.config["NODE_CONFIG_PATH"] = cfg.node_config_path
+        app.config["BLEND_KEYS"] = cfg.blend
     except Exception as e:
         logger.warning("Config load failed, using fallback node URL: %s", e)
         node_url = "http://127.0.0.1:8080"
+    app.config["NODE_URL"] = node_url
 
     # Proxy: browser calls /api/proxy/<path> → Flask forwards to Logos node
     # This avoids CORS since browser always talks to the same origin (port 8282)
