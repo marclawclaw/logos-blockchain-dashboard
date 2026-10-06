@@ -214,13 +214,6 @@
     <div class="metric"><span class="metric-label">Connections</span><span class="metric-value" id="connections">—</span></div>
   </div>
 
-  <!-- Block Producer -->
-  <div class="card">
-    <div class="card-title">Block Producer</div>
-    <div class="metric"><span class="metric-label">Current Leader</span><span class="metric-value" id="block-producer">—</span></div>
-    <div class="metric"><span class="metric-label">Key (truncated)</span><span class="metric-value" id="block-producer-short" style="font-size:11px">—</span></div>
-  </div>
-
   <!-- Wallets -->
   <div class="card">
     <div class="card-title">Voucher Wallet</div>
@@ -293,10 +286,6 @@
     <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
   </div>
 
-  <div class="card chart-card">
-    <div class="card-title">Block Producer Distribution</div>
-    <div class="chart-wrap"><canvas id="chart-producers"></canvas></div>
-  </div>
 
 </div>
 
@@ -404,6 +393,28 @@ function makeChart(id, label, color) {
   });
 }
 
+// Wallet chart: one dataset per wallet sharing the label axis. pushPoint() only
+// writes datasets[0], which piled every wallet onto the first line. Missing or
+// zero balances become null (a gap): the log scale cannot plot 0.
+function pushWallets(chart, timestamp, balances) {
+  const label = localTime(timestamp);
+  let idx = chart.data.labels.indexOf(label);
+  if (idx === -1) {
+    chart.data.labels.push(label);
+    for (const ds of chart.data.datasets) ds.data.push(null);
+    idx = chart.data.labels.length - 1;
+  }
+  for (const ds of chart.data.datasets) {
+    const v = Number(balances[ds.label]);
+    if (v > 0) ds.data[idx] = v;
+  }
+  if (chart.data.labels.length > 200) {
+    chart.data.labels.shift();
+    for (const ds of chart.data.datasets) ds.data.shift();
+  }
+  chart.update('none');
+}
+
 function pushPoint(chart, timestamp, value) {
   // Skip if this timestamp already exists (avoids duplicate labels from init race)
   if (chart.data.labels.includes(localTime(timestamp))) return;
@@ -477,6 +488,7 @@ async function fetchLatest() {
       peer_count: net.n_peers,
       n_connections: net.n_connections,
       mempool_depth: mem.pending_items,
+      mempool_last_ms: mem.last_item_timestamp,   // ms epoch of newest mempool item
       wallet_balances: JSON.stringify(balances),
     };
   } catch (e) {
@@ -567,9 +579,12 @@ function renderSnapshot(snap) {
   // Mempool
   setVal(document.getElementById('mempool-depth'), snap.mempool_depth);
   const ageEl = document.getElementById('mempool-age');
-  if (snap.mempool_age_ms != null) {
-    const secs = Math.floor((Date.now() / 1000 - ts * 1000) / 1000);
-    ageEl.textContent = secs < 60 ? `${secs}s ago` : `${Math.floor(secs/60)}m ago`;
+  if (snap.mempool_last_ms) {
+    // Was keyed on a mempool_age_ms field nothing ever set, so it always showed "—".
+    const secs = Math.max(0, Math.floor((Date.now() - snap.mempool_last_ms) / 1000));
+    ageEl.textContent = secs < 60 ? `${secs}s ago`
+      : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`;
+    ageEl.classList.remove('unknown');
   } else {
     setUnknown(ageEl);
   }
@@ -577,11 +592,6 @@ function renderSnapshot(snap) {
   // Network
   setVal(document.getElementById('peer-count'), snap.peer_count);
   setVal(document.getElementById('connections'), snap.n_connections || '—');
-
-  // Block producer
-  const bp = snap.block_producer;
-  setVal(document.getElementById('block-producer'), bp || '—');
-  setVal(document.getElementById('block-producer-short'), bp ? bp.slice(0, 16) + '...' : '—');
 
   // Wallet balances
   let balances = {};
@@ -601,12 +611,7 @@ function renderSnapshot(snap) {
   if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
 
   // Wallet chart
-  if (charts.wallets) {
-    for (const [name, val] of Object.entries(balances)) {
-      const ds = charts.wallets.data.datasets.find(d => d.label === name);
-      if (ds) pushPoint(charts.wallets, ts, val);
-    }
-  }
+  if (charts.wallets) pushWallets(charts.wallets, ts, balances);
 }
 
 function updateHistory(data) {
@@ -641,10 +646,7 @@ function updateHistory(data) {
     }
     let balances = {};
     try { balances = JSON.parse(snap.wallet_balances || '{}'); } catch (_) {}
-    for (const [name, val] of Object.entries(balances)) {
-      const ds = charts.wallets?.data?.datasets?.find(d => d.label === name);
-      if (ds) pushPoint(charts.wallets, ts, val);
-    }
+    if (charts.wallets) pushWallets(charts.wallets, ts, balances);
   }
 }
 
@@ -739,19 +741,6 @@ async function init() {
   // Seed wallet chart with one dataset per known wallet
   const walletNames = Object.keys(WALLETS);
   const walletColors = ['#58a6ff', '#3fb950', '#d29922'];
-  charts.producers = new Chart(document.getElementById('chart-producers').getContext('2d'), {
-    type: 'bar',
-    data: { labels: [], datasets: [] },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
-      scales: {
-        x: { stacked: true, grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
-        y: { stacked: true, grid: { color: '#30363d' }, ticks: { color: '#8b949e' }, beginAtZero: true },
-      },
-    },
-  });
-
   charts.wallets = new Chart(document.getElementById('chart-wallets').getContext('2d'), {
     type: 'line',
     data: { labels: [], datasets: walletNames.map((name, i) => ({
@@ -764,7 +753,16 @@ async function init() {
       plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
       scales: {
         x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
-        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+        // Log scale: balances span many orders of magnitude (faucet-era 1e12
+        // vs PoW rewards ~1e8), which flattens the small ones on a linear axis.
+        y: {
+          type: 'logarithmic', grid: { color: '#30363d' },
+          ticks: {
+            color: '#8b949e',
+            callback: (v) => Number.isInteger(Math.log10(v))
+              ? Number(v).toLocaleString(undefined, { notation: 'compact' }) : '',
+          },
+        },
       },
     },
   });
