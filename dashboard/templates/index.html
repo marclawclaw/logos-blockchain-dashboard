@@ -216,13 +216,18 @@
 
   <!-- Wallets -->
   <div class="card">
+    <div class="card-title">Stake Wallet</div>
+    <div class="wallet-name">stake (Stake key, genesis stake)</div>
+    <div class="wallet-balance" id="wallet-stake">—</div>
+  </div>
+  <div class="card">
     <div class="card-title">Voucher Wallet</div>
-    <div class="wallet-name">voucher</div>
+    <div class="wallet-name">voucher (VoucherMaster)</div>
     <div class="wallet-balance" id="wallet-voucher">—</div>
   </div>
   <div class="card">
     <div class="card-title">Funding Wallet</div>
-    <div class="wallet-name">funding</div>
+    <div class="wallet-name">funding (SdpFunding)</div>
     <div class="wallet-balance" id="wallet-funding">—</div>
   </div>
   <div class="card">
@@ -312,9 +317,11 @@ const BLEND_REFRESH_MS = 60000;     // declarations change per epoch, no need to
 // name -> address, for live wallet-balance polling via the node proxy.
 // Keep in sync with config.local.yaml wallets and the wallet-<name> card ids.
 const WALLETS = {
-  voucher: '966ff8f26c93914c9e9ed5c4b8a36f3b11c4544fb10dd4cd688599bc0f82a928',
-  funding: 'f67a3ba0712d9d078a8f0980188b367056ffee0092df196f54cbb8f24ce1b916',
-  pow: 'ce299202a9b8c7500e8fdbb7ec66506df85695a784cd39dd245fcef12b0da323',
+  // Testnet v0.3 relaunch (module 0.3.1, 2026-10-10): keys from the node's keystore.yaml public_keys.
+  stake: 'b76801e8ef95cc21ef3bb6434167766c7a9760cb976ef630245c8f0419c1a521',
+  voucher: '20903a167971f2baf047e3c2601c8b0c9625549abee9729dae05f22bb125960f',
+  funding: '896a829ad3c3fd1f899101985674f456591274a4a1a784fb5913db621f029707',
+  pow: '409be493b2cb020c25536ec0b643fcdf8e8cb52f165c1ce7baba696b9e979e13',
 };
 let selectedScale = '1d';          // default time scale
 
@@ -740,7 +747,7 @@ async function refresh() {
 async function init() {
   // Seed wallet chart with one dataset per known wallet
   const walletNames = Object.keys(WALLETS);
-  const walletColors = ['#58a6ff', '#3fb950', '#d29922'];
+  const walletColors = ['#bc8cff', '#58a6ff', '#3fb950', '#d29922'];
   charts.wallets = new Chart(document.getElementById('chart-wallets').getContext('2d'), {
     type: 'line',
     data: { labels: [], datasets: walletNames.map((name, i) => ({
