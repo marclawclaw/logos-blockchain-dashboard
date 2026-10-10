@@ -10,12 +10,25 @@ ZK = "227caea8b0ebc716f9fc1e55416070dc3dc59295142f95f9c933af0369d58c0a"
 PROVIDER = "e48790bc24d4d8f32e162de8f0babc44eafffe313abec12a8422a3c1005382f8"
 
 
-def _decl(created, active, ip="1.2.3.4", zk="aa", provider="bb", withdraw_at=None, service_type="BN"):
+def _decl(created, active, ip="1.2.3.4", zk="aa", provider="bb", withdraw_at=None, service_type="BN",
+          nonce=1):
+    # nonce > 0: the node has re-attested, so `active` is a real (past) epoch.
     return {
         "service_type": service_type, "provider_id": provider, "service_note_id": "note",
         "locators": [f"/ip4/{ip}/udp/3400/quic-v1"], "zk_id": zk,
-        "created": created, "active": active, "withdraw_at": withdraw_at, "nonce": 0,
+        "created": created, "active": active, "withdraw_at": withdraw_at, "nonce": nonce,
     }
+
+
+def test_fresh_chain_declarations_are_pending_not_active():
+    """At chain start every declaration reads created=0, active=2, nonce=0: `active` is the
+    epoch it takes effect, not the current epoch, so the epoch is 0 and all are pending."""
+    decls = {"ours": _decl(0, 2, zk=ZK, nonce=0), "fleet": _decl(0, 2, ip="65.109.51.37", nonce=0)}
+    s = blend.summarize(decls, {"core_info": None}, ZK, None, "1.2.3.4")
+    assert s["epoch"] == 0
+    assert s["network"]["pending"] == 2 and s["network"]["active"] == 0
+    assert s["node"]["status"] == "pending"
+    assert s["node"]["activates_at"] == 2
 
 
 def test_parse_locator():

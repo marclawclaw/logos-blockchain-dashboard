@@ -38,9 +38,19 @@ def parse_locator(locator: str) -> tuple[str | None, int | None]:
 
 def latest_epoch(declarations: dict) -> int | None:
     """Best available view of the current epoch: the highest epoch any
-    declaration was created in or re-attested for."""
-    epochs = [e for d in declarations.values()
-              for e in (d.get("created"), d.get("active")) if isinstance(e, int)]
+    declaration was created in or re-attested for.
+
+    A declaration's ``active`` starts at ``created + 2`` (the epoch it takes
+    effect) and only tracks real attestations once the node has sent an Active
+    message (``nonce`` > 0), so an un-attested ``active`` is a future epoch and
+    must not be counted.
+    """
+    epochs = []
+    for d in declarations.values():
+        if isinstance(d.get("created"), int):
+            epochs.append(d["created"])
+        if isinstance(d.get("active"), int) and (d.get("nonce") or 0) > 0:
+            epochs.append(d["active"])
     return max(epochs) if epochs else None
 
 
