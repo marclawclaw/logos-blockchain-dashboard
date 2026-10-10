@@ -116,6 +116,106 @@ def test_fetcher_handles_malformed_json():
         assert result is None
 
 
+def _mock_get_json(payload):
+    """Build a requests.get mock returning `payload` as JSON with status 200."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = payload
+    return mock_resp
+
+
+def test_fetch_cryptarchia_info_v020_nested_shape():
+    """Node 0.2.0 nests fields under cryptarchia_info and mode is an object."""
+    from collector.fetcher import fetch_cryptarchia_info
+
+    payload = {
+        "cryptarchia_info": {
+            "lib": "aa11", "lib_slot": 0, "tip": "bb22",
+            "slot": 244778, "height": 8257,
+        },
+        "mode": {"Started": "Bootstrapping"},
+    }
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json(payload)):
+        info = fetch_cryptarchia_info("http://localhost:38437")
+    assert info is not None
+    assert info.lib == "aa11"
+    assert info.tip == "bb22"
+    assert info.slot == 244778
+    assert info.height == 8257
+    assert info.mode == "Bootstrapping"
+
+
+def test_fetch_cryptarchia_info_v023_state_shape():
+    """Node 0.2.3 renames mode to "state" (a plain string) and adds top-level "phase"."""
+    from collector.fetcher import fetch_cryptarchia_info
+
+    payload = {
+        "cryptarchia_info": {
+            "lib": "ee55", "lib_slot": 0, "tip": "ff66",
+            "slot": 500136, "height": 16804, "state": "Bootstrapping",
+        },
+        "phase": "InitialBlockDownload",
+    }
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json(payload)):
+        info = fetch_cryptarchia_info("http://localhost:38437")
+    assert info is not None
+    assert info.lib == "ee55"
+    assert info.height == 16804
+    assert info.mode == "Bootstrapping"
+
+
+def test_fetch_cryptarchia_info_v023_falls_back_to_phase():
+    """When cryptarchia_info has no state, fall back to the top-level "phase"."""
+    from collector.fetcher import fetch_cryptarchia_info
+
+    payload = {
+        "cryptarchia_info": {
+            "lib": "aa99", "lib_slot": 0, "tip": "bb88",
+            "slot": 1, "height": 0,
+        },
+        "phase": "InitialBlockDownload",
+    }
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json(payload)):
+        info = fetch_cryptarchia_info("http://localhost:38437")
+    assert info is not None
+    assert info.mode == "InitialBlockDownload"
+
+
+def test_fetch_cryptarchia_info_v012_flat_shape():
+    """Node 0.1.x flat shape still parses (rollback compatibility)."""
+    from collector.fetcher import fetch_cryptarchia_info
+
+    payload = {"lib": "cc33", "tip": "dd44", "slot": 100, "height": 500, "mode": "Normal"}
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json(payload)):
+        info = fetch_cryptarchia_info("http://localhost:38437")
+    assert info is not None
+    assert info.lib == "cc33"
+    assert info.height == 500
+    assert info.mode == "Normal"
+
+
+def test_normalize_mode_variants():
+    """Mode normalizes from string and from 0.2.0 object forms."""
+    from collector.fetcher import _normalize_mode
+
+    assert _normalize_mode("Bootstrapping") == "Bootstrapping"
+    assert _normalize_mode({"Started": "Bootstrapping"}) == "Bootstrapping"
+    assert _normalize_mode({"Online": None}) == "Online"
+    assert _normalize_mode(None) == "unknown"
+
+
+def test_fetch_latest_block_uses_slot_to_param():
+    """0.2.0 requires slot_to (not to_slot) as the upper bound."""
+    from collector.fetcher import fetch_latest_block
+
+    with patch("collector.fetcher.requests.get", return_value=_mock_get_json([])) as mock_get:
+        fetch_latest_block("http://localhost:38437", 42)
+    called_url = mock_get.call_args[0][0]
+    assert "slot_to=42" in called_url
+    assert "to_slot=" not in called_url
+
+
 def test_fetcher_partial_success():
     """One endpoint fails; others return correct values."""
     from collector.fetcher import fetch_all

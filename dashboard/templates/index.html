@@ -116,6 +116,21 @@
     }
     .wallet-name { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 
+    /* Blend */
+    .pill {
+      display: inline-block; padding: 1px 8px; border-radius: 10px;
+      font-size: 12px; font-weight: 600; border: 1px solid var(--border); color: var(--muted);
+    }
+    .pill.active { color: var(--green); border-color: var(--green); }
+    .pill.pending { color: var(--accent); border-color: var(--accent); }
+    .pill.inactive, .pill.withdrawn { color: var(--amber); border-color: var(--amber); }
+    .metric-value.ok { color: var(--green); }
+    .metric-value.bad { color: var(--red); }
+    .blend-warning {
+      display: none; margin-top: 8px; padding: 6px 8px; border-radius: 4px;
+      border: 1px solid var(--red); color: var(--red); font-size: 12px;
+    }
+
     /* Footer */
     footer {
       padding: 12px 24px;
@@ -165,6 +180,7 @@
     <button class="timescale-btn" data-scale="1w">1w</button>
     <button class="timescale-btn" data-scale="1m">1m</button>
     <button class="timescale-btn" data-scale="Max">Max</button>
+    <button class="timescale-btn" id="ip-toggle" title="Mask IP addresses (safe for screenshots)">Show IPs</button>
   </div>
   <div id="status">
     <span id="status-dot"></span>
@@ -198,23 +214,44 @@
     <div class="metric"><span class="metric-label">Connections</span><span class="metric-value" id="connections">—</span></div>
   </div>
 
-  <!-- Block Producer -->
-  <div class="card">
-    <div class="card-title">Block Producer</div>
-    <div class="metric"><span class="metric-label">Current Leader</span><span class="metric-value" id="block-producer">—</span></div>
-    <div class="metric"><span class="metric-label">Key (truncated)</span><span class="metric-value" id="block-producer-short" style="font-size:11px">—</span></div>
-  </div>
-
   <!-- Wallets -->
   <div class="card">
+    <div class="card-title">Stake Wallet</div>
+    <div class="wallet-name">stake (Stake key, genesis stake)</div>
+    <div class="wallet-balance" id="wallet-stake">—</div>
+  </div>
+  <div class="card">
     <div class="card-title">Voucher Wallet</div>
-    <div class="wallet-name">voucher</div>
+    <div class="wallet-name">voucher (VoucherMaster)</div>
     <div class="wallet-balance" id="wallet-voucher">—</div>
   </div>
   <div class="card">
     <div class="card-title">Funding Wallet</div>
-    <div class="wallet-name">funding</div>
+    <div class="wallet-name">funding (SdpFunding)</div>
     <div class="wallet-balance" id="wallet-funding">—</div>
+  </div>
+  <div class="card">
+    <div class="card-title">PoW Rewards Wallet</div>
+    <div class="wallet-name">pow (PoWClaim, auto-claimed mining rewards)</div>
+    <div class="wallet-balance" id="wallet-pow">—</div>
+  </div>
+
+  <!-- Blend Network -->
+  <div class="card">
+    <div class="card-title">Blend — This Node</div>
+    <div class="metric"><span class="metric-label">Core node</span><span class="metric-value" id="blend-status">—</span></div>
+    <div class="metric"><span class="metric-label">Declared / active epoch</span><span class="metric-value" id="blend-epochs">—</span></div>
+    <div class="metric"><span class="metric-label">Registered IP</span><span class="metric-value" id="blend-reg-ip">—</span></div>
+    <div class="metric"><span class="metric-label">Current public IP</span><span class="metric-value" id="blend-pub-ip">—</span></div>
+    <div class="blend-warning" id="blend-ip-warning"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Blend — Network</div>
+    <div class="metric"><span class="metric-label">Core nodes (declared)</span><span class="metric-value" id="blend-total">—</span></div>
+    <div class="metric"><span class="metric-label">Active / pending</span><span class="metric-value" id="blend-active">—</span></div>
+    <div class="metric"><span class="metric-label">Inactive / withdrawn</span><span class="metric-value" id="blend-inactive">—</span></div>
+    <div class="metric"><span class="metric-label">Distinct hosts</span><span class="metric-value" id="blend-hosts">—</span></div>
+    <div class="metric"><span class="metric-label">Latest epoch</span><span class="metric-value" id="blend-epoch">—</span></div>
   </div>
 
   <!-- Charts -->
@@ -254,10 +291,6 @@
     <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
   </div>
 
-  <div class="card chart-card">
-    <div class="card-title">Block Producer Distribution</div>
-    <div class="chart-wrap"><canvas id="chart-producers"></canvas></div>
-  </div>
 
 </div>
 
@@ -280,20 +313,30 @@ const API_BASE = '/api';
 // Logos node API proxied via Flask (avoids CORS) (from server-side config)
 // Time scale options: maps button label to hours sent to GET /api/snapshots?hours=N
 const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
+const BLEND_REFRESH_MS = 60000;     // declarations change per epoch, no need to poll fast
 // name -> address, for live wallet-balance polling via the node proxy.
 // Keep in sync with config.local.yaml wallets and the wallet-<name> card ids.
 const WALLETS = {
-  voucher: '966ff8f26c93914c9e9ed5c4b8a36f3b11c4544fb10dd4cd688599bc0f82a928',
-  funding: 'f67a3ba0712d9d078a8f0980188b367056ffee0092df196f54cbb8f24ce1b916',
+  // Testnet v0.3 relaunch (module 0.3.1, 2026-10-10): keys from the node's keystore.yaml public_keys.
+  stake: 'b76801e8ef95cc21ef3bb6434167766c7a9760cb976ef630245c8f0419c1a521',
+  voucher: '20903a167971f2baf047e3c2601c8b0c9625549abee9729dae05f22bb125960f',
+  funding: '896a829ad3c3fd1f899101985674f456591274a4a1a784fb5913db621f029707',
+  pow: '409be493b2cb020c25536ec0b643fcdf8e8cb52f165c1ce7baba696b9e979e13',
 };
 let selectedScale = '1d';          // default time scale
 
 // ─────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────
-function localTime(epochMs) {
-  if (!epochMs) return '—';
-  return new Date(epochMs * 1000).toLocaleTimeString();
+// Chart x-axis label, e.g. "6 Oct 14:05:23". Includes the date so multi-day
+// scales are readable, and seconds so labels stay unique: pushPoint() dedupes
+// on the label, and live points arrive every few seconds.
+function localTime(epochSec) {
+  if (!epochSec) return '—';
+  const d = new Date(epochSec * 1000);
+  const date = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return `${date} ${time}`;
 }
 
 function setUnknown(el, text) {
@@ -357,6 +400,28 @@ function makeChart(id, label, color) {
   });
 }
 
+// Wallet chart: one dataset per wallet sharing the label axis. pushPoint() only
+// writes datasets[0], which piled every wallet onto the first line. Missing or
+// zero balances become null (a gap): the log scale cannot plot 0.
+function pushWallets(chart, timestamp, balances) {
+  const label = localTime(timestamp);
+  let idx = chart.data.labels.indexOf(label);
+  if (idx === -1) {
+    chart.data.labels.push(label);
+    for (const ds of chart.data.datasets) ds.data.push(null);
+    idx = chart.data.labels.length - 1;
+  }
+  for (const ds of chart.data.datasets) {
+    const v = Number(balances[ds.label]);
+    if (v > 0) ds.data[idx] = v;
+  }
+  if (chart.data.labels.length > 200) {
+    chart.data.labels.shift();
+    for (const ds of chart.data.datasets) ds.data.shift();
+  }
+  chart.update('none');
+}
+
 function pushPoint(chart, timestamp, value) {
   // Skip if this timestamp already exists (avoids duplicate labels from init race)
   if (chart.data.labels.includes(localTime(timestamp))) return;
@@ -372,6 +437,18 @@ function pushPoint(chart, timestamp, value) {
 // ─────────────────────────────────────────────────────────────
 // API
 // ─────────────────────────────────────────────────────────────
+// Node 0.1.x returned mode as a string ("Bootstrapping"); 0.2.0 returns an
+// object like {"Started":"Bootstrapping"} or {"Online":null}. Reduce to a name.
+function normalizeMode(mode) {
+  if (mode == null) return 'unknown';
+  if (typeof mode === 'string') return mode;
+  if (typeof mode === 'object') {
+    const [key, value] = Object.entries(mode)[0] || ['unknown', null];
+    return (typeof value === 'string' && value) ? value : key;
+  }
+  return String(mode);
+}
+
 async function fetchLatest() {
   // Poll the Logos node APIs directly for live data
   try {
@@ -383,7 +460,17 @@ async function fetchLatest() {
 
     if (!infoRes.ok || !netRes.ok || !memRes.ok) throw new Error('Node API error');
 
-    const info = await infoRes.json();
+    const infoRaw = await infoRes.json();
+    // Node 0.2.0 nests consensus fields under "cryptarchia_info" and moves
+    // "mode" to the top level; 0.1.x was flat. 0.2.3 renames it to "state"
+    // (a plain string) inside cryptarchia_info and adds a top-level "phase"
+    // ("InitialBlockDownload", etc). Support all three.
+    const info = infoRaw.cryptarchia_info || infoRaw;
+    const rawMode = infoRaw.mode != null ? infoRaw.mode
+      : info.mode != null ? info.mode
+      : info.state != null ? info.state
+      : infoRaw.phase;
+    const modeVal = normalizeMode(rawMode);
     const net = await netRes.json();
     const mem = await memRes.json();
 
@@ -402,12 +489,13 @@ async function fetchLatest() {
     return {
       _ts: lastLiveFetch,
       chain_tip: info.height,
-      mode: info.mode,
+      mode: modeVal,
       epoch: info.slot,
       lib: info.lib,
       peer_count: net.n_peers,
       n_connections: net.n_connections,
       mempool_depth: mem.pending_items,
+      mempool_last_ms: mem.last_item_timestamp,   // ms epoch of newest mempool item
       wallet_balances: JSON.stringify(balances),
     };
   } catch (e) {
@@ -498,9 +586,12 @@ function renderSnapshot(snap) {
   // Mempool
   setVal(document.getElementById('mempool-depth'), snap.mempool_depth);
   const ageEl = document.getElementById('mempool-age');
-  if (snap.mempool_age_ms != null) {
-    const secs = Math.floor((Date.now() / 1000 - ts * 1000) / 1000);
-    ageEl.textContent = secs < 60 ? `${secs}s ago` : `${Math.floor(secs/60)}m ago`;
+  if (snap.mempool_last_ms) {
+    // Was keyed on a mempool_age_ms field nothing ever set, so it always showed "—".
+    const secs = Math.max(0, Math.floor((Date.now() - snap.mempool_last_ms) / 1000));
+    ageEl.textContent = secs < 60 ? `${secs}s ago`
+      : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`;
+    ageEl.classList.remove('unknown');
   } else {
     setUnknown(ageEl);
   }
@@ -508,11 +599,6 @@ function renderSnapshot(snap) {
   // Network
   setVal(document.getElementById('peer-count'), snap.peer_count);
   setVal(document.getElementById('connections'), snap.n_connections || '—');
-
-  // Block producer
-  const bp = snap.block_producer;
-  setVal(document.getElementById('block-producer'), bp || '—');
-  setVal(document.getElementById('block-producer-short'), bp ? bp.slice(0, 16) + '...' : '—');
 
   // Wallet balances
   let balances = {};
@@ -532,12 +618,7 @@ function renderSnapshot(snap) {
   if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
 
   // Wallet chart
-  if (charts.wallets) {
-    for (const [name, val] of Object.entries(balances)) {
-      const ds = charts.wallets.data.datasets.find(d => d.label === name);
-      if (ds) pushPoint(charts.wallets, ts, val);
-    }
-  }
+  if (charts.wallets) pushWallets(charts.wallets, ts, balances);
 }
 
 function updateHistory(data) {
@@ -572,11 +653,84 @@ function updateHistory(data) {
     }
     let balances = {};
     try { balances = JSON.parse(snap.wallet_balances || '{}'); } catch (_) {}
-    for (const [name, val] of Object.entries(balances)) {
-      const ds = charts.wallets?.data?.datasets?.find(d => d.label === name);
-      if (ds) pushPoint(charts.wallets, ts, val);
-    }
+    if (charts.wallets) pushWallets(charts.wallets, ts, balances);
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Blend Network
+// ─────────────────────────────────────────────────────────────
+const BLEND_STATUS_LABELS = {
+  active: 'Active', pending: 'Pending activation', inactive: 'Inactive',
+  withdrawn: 'Withdrawn', not_declared: 'Not declared',
+};
+const IP_PREF_KEY = 'showIps';
+// IPs are masked by default so screenshots are safe; the toggle is remembered per browser.
+let showIps = false;
+try { showIps = localStorage.getItem(IP_PREF_KEY) === '1'; } catch (_) {}
+let lastBlend = null;
+
+function fmtIp(ip) {
+  if (!ip) return ip;
+  return showIps ? ip : '•••.•••.•••.•••';
+}
+
+function setShowIps(on) {
+  showIps = on;
+  try { localStorage.setItem(IP_PREF_KEY, on ? '1' : '0'); } catch (_) {}
+  const btn = document.getElementById('ip-toggle');
+  btn.textContent = on ? 'Hide IPs' : 'Show IPs';
+  btn.classList.toggle('active', on);
+  if (lastBlend) renderBlend(lastBlend);
+}
+
+async function refreshBlend() {
+  try {
+    const r = await fetch(`${API_BASE}/blend/status`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    lastBlend = await r.json();
+  } catch (e) {
+    setUnknown(document.getElementById('blend-status'), 'unavailable');
+    return;
+  }
+  renderBlend(lastBlend);
+}
+
+function renderBlend(data) {
+  const node = data.node || {};
+  const net = data.network || {};
+
+  const statusEl = document.getElementById('blend-status');
+  statusEl.innerHTML = '';
+  const pill = document.createElement('span');
+  pill.className = `pill ${node.status}`;
+  pill.textContent = BLEND_STATUS_LABELS[node.status] || node.status;
+  if (node.status === 'pending' && node.activates_at != null) pill.textContent += ` (epoch ${node.activates_at})`;
+  statusEl.appendChild(pill);
+
+  setVal(document.getElementById('blend-epochs'),
+    node.declared ? `${node.created ?? '—'} / ${node.active ?? '—'}` : '—');
+  setVal(document.getElementById('blend-reg-ip'),
+    node.registered_ip ? `${fmtIp(node.registered_ip)}:${node.registered_port}` : null);
+  const pubEl = document.getElementById('blend-pub-ip');
+  setVal(pubEl, fmtIp(node.public_ip));
+  pubEl.classList.toggle('ok', node.ip_match === true);
+  pubEl.classList.toggle('bad', node.ip_match === false);
+
+  const warn = document.getElementById('blend-ip-warning');
+  if (node.ip_match === false) {
+    warn.textContent = `Public IP changed: declaration advertises ${fmtIp(node.registered_ip)} but this host is now ${fmtIp(node.public_ip)}. ` +
+      'Peers cannot reach the Blend listener — re-declare with the new locator.';
+    warn.style.display = 'block';
+  } else {
+    warn.style.display = 'none';
+  }
+
+  setVal(document.getElementById('blend-total'), net.core_nodes);
+  setVal(document.getElementById('blend-active'), `${net.active ?? '—'} / ${net.pending ?? '—'}`);
+  setVal(document.getElementById('blend-inactive'), `${net.inactive ?? '—'} / ${net.withdrawn ?? '—'}`);
+  setVal(document.getElementById('blend-hosts'), net.distinct_hosts);
+  setVal(document.getElementById('blend-epoch'), data.epoch);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -593,20 +747,7 @@ async function refresh() {
 async function init() {
   // Seed wallet chart with one dataset per known wallet
   const walletNames = Object.keys(WALLETS);
-  const walletColors = ['#58a6ff', '#3fb950'];
-  charts.producers = new Chart(document.getElementById('chart-producers').getContext('2d'), {
-    type: 'bar',
-    data: { labels: [], datasets: [] },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
-      scales: {
-        x: { stacked: true, grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
-        y: { stacked: true, grid: { color: '#30363d' }, ticks: { color: '#8b949e' }, beginAtZero: true },
-      },
-    },
-  });
-
+  const walletColors = ['#bc8cff', '#58a6ff', '#3fb950', '#d29922'];
   charts.wallets = new Chart(document.getElementById('chart-wallets').getContext('2d'), {
     type: 'line',
     data: { labels: [], datasets: walletNames.map((name, i) => ({
@@ -619,7 +760,16 @@ async function init() {
       plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
       scales: {
         x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
-        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+        // Log scale: balances span many orders of magnitude (faucet-era 1e12
+        // vs PoW rewards ~1e8), which flattens the small ones on a linear axis.
+        y: {
+          type: 'logarithmic', grid: { color: '#30363d' },
+          ticks: {
+            color: '#8b949e',
+            callback: (v) => Number.isInteger(Math.log10(v))
+              ? Number(v).toLocaleString(undefined, { notation: 'compact' }) : '',
+          },
+        },
       },
     },
   });
@@ -655,14 +805,18 @@ async function init() {
   if (!document.hidden) {
     refreshInterval = setInterval(refresh, REFRESH_MS);
   }
+  setShowIps(showIps);
+  document.getElementById('ip-toggle').addEventListener('click', () => setShowIps(!showIps));
+  refreshBlend();
+  setInterval(() => { if (!document.hidden) refreshBlend(); }, BLEND_REFRESH_MS);
 
   // Wire up time scale selector buttons
-  document.querySelectorAll('.timescale-btn').forEach(btn => {
+  document.querySelectorAll('.timescale-btn[data-scale]').forEach(btn => {
     btn.addEventListener('click', () => {
       const scale = btn.dataset.scale;
       if (scale === selectedScale) return;
       selectedScale = scale;
-      document.querySelectorAll('.timescale-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.timescale-btn[data-scale]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       loadHistory(scale);
     });

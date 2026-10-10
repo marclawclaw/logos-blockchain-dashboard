@@ -61,6 +61,39 @@ def snapshots():
     return jsonify({"snapshots": rows, "count": len(rows)})
 
 
+@api.route("/blend/status", methods=["GET"])
+def blend_status():
+    """Blend Network stats, this node's core declaration, and an IP drift check."""
+    import requests
+    from flask import current_app
+    from . import blend
+
+    node_url = current_app.config.get("NODE_URL", "http://127.0.0.1:8080")
+
+    def node_get(path):
+        try:
+            r = requests.get(f"{node_url}{path}", timeout=10)
+            return r.json() if r.ok else None
+        except Exception as e:
+            logger.warning("Blend status: GET %s failed: %s", path, e)
+            return None
+
+    declarations = node_get("/mantle/sdp/declarations")
+    if declarations is None:
+        return jsonify({"error": "Node SDP declarations unavailable"}), 502
+
+    overrides = current_app.config.get("BLEND_KEYS") or {}
+    zk_id, provider_id = blend.our_blend_keys(current_app.config.get("NODE_CONFIG_PATH"))
+    summary = blend.summarize(
+        declarations,
+        node_get("/blend/info"),
+        overrides.get("zk_id") or zk_id,
+        overrides.get("provider_id") or provider_id,
+        blend.detect_public_ip(),
+    )
+    return jsonify(summary)
+
+
 @api.route("/health", methods=["GET"])
 def health():
     """Simple liveness check."""
