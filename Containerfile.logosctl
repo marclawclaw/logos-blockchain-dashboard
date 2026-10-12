@@ -1,0 +1,19 @@
+# Dashboard image with the logosctl client, for machines that run storage or
+# delivery nodes. logosctl is copied from the Logos Core image so client and
+# daemon are always the same version.
+#
+#   podman build -t logos-dashboard:base .
+#   podman build -t logos-dashboard:logosctl -f Containerfile.logosctl \
+#       --build-arg LOGOS_CORE_IMAGE=localhost/logos-core:0.3.0 .
+ARG LOGOS_CORE_IMAGE=localhost/logos-core:0.3.0
+ARG DASHBOARD_IMAGE=localhost/logos-dashboard:base
+
+FROM ${LOGOS_CORE_IMAGE} AS core
+
+FROM ${DASHBOARD_IMAGE}
+# The extracted logosctl AppImage ships its own libraries; only glibc comes
+# from the image, so both images must share a Debian release.
+COPY --from=core /opt/logosctl /opt/logosctl
+RUN ln -s /opt/logosctl/AppRun /usr/local/bin/logosctl
+# The session holding client/config.yaml and the token file; mount it here.
+ENV LOGOSCTL_CONFIG_DIR=/app/logosctl

@@ -51,6 +51,7 @@ class FetchResult:
     mode: Optional[str] = None  # "Bootstrapping", "Normal", etc.
     epoch: Optional[int] = None
     mempool_depth: int = 0
+    mempool_last_ms: Optional[int] = None  # ms epoch of the newest mempool item
     peer_count: int = 0
     n_connections: int = 0
     wallet_balances: dict[str, Optional[int]] = None  # {name: balance}
@@ -275,6 +276,7 @@ def fetch_all(base_url: str, wallet_names: list[tuple[str, str]]) -> FetchResult
     mempool = fetch_mempool_metrics(base_url)
     if mempool:
         result.mempool_depth = mempool.pending_items
+        result.mempool_last_ms = mempool.last_item_timestamp
 
     result.wallet_balances = {}
     for name, address in wallet_names:

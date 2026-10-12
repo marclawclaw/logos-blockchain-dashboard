@@ -7,12 +7,14 @@ import logging
 import signal
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 
-from .config import load, Config
-from .db import init_db, write_snapshot, prune_old_snapshots, get_latest_snapshot
+from .config import load, default_config_path, Config
+from .db import init_db, write_snapshot, write_kind_snapshot, prune_old_snapshots
 from .fetcher import fetch_all
 from .host import read_host_metrics
+from .modules import read_modules
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,8 @@ def main() -> None:
     run_p = sub.add_parser("run", help="Run the collector loop")
     run_p.add_argument("--daemon", action="store_true", help="Run as background daemon")
     run_p.add_argument("--once", action="store_true", help="Run one collection and exit")
-    run_p.add_argument("--config", default="config.yaml", help="Path to config.yaml")
+    run_p.add_argument("--config", default=None,
+                       help="Path to config (default: config.local.yaml if present, else config.yaml)")
     run_p.add_argument("--db", default="data/snapshots.db", help="Path to SQLite DB")
 
     args = parser.parse_args()
@@ -47,7 +50,8 @@ def main() -> None:
         print(f"Database initialised at {args.db}")
 
     elif args.command == "run":
-        config = load(args.config)
+        project_root = Path(__file__).parent.parent
+        config = load(args.config or str(default_config_path(project_root)))
         _run(config, args.db, daemon=args.daemon, once=args.once)
 
 
@@ -78,7 +82,8 @@ def _run(config: Config, db_path: str, daemon: bool = False, once: bool = False)
     signal.signal(signal.SIGINT, shutdown)
 
     logger.info(
-        "Collector starting — polling every %d min, DB at %s",
+        "Collector starting — polling %s every %d min, DB at %s",
+        ", ".join(config.kinds) or "the host only (no node kind configured)",
         config.interval_minutes,
         db_path,
     )
@@ -101,27 +106,50 @@ def _run(config: Config, db_path: str, daemon: bool = False, once: bool = False)
 
 
 def _collect_and_store(config: Config, db_path: str) -> None:
-    """Fetch metrics, compute delta, and write snapshot.
+    """Read every deployed node kind plus the host, and write one snapshot each.
 
-    If all API endpoints fail (chain_tip is None), the snapshot is skipped entirely
-    per the spec. This means:
-    - First run, all APIs fail -> no snapshot written, no error banner shown yet
-    - Subsequent runs, all APIs fail -> snapshot skipped, dashboard shows last known values
+    Kinds are independent: a kind that cannot be read is skipped for this
+    interval (its history shows a gap) without affecting the others. Host
+    metrics are written every interval, whatever the nodes do.
     """
-    wallet_tuples = [(w.name, w.address) for w in config.wallets]
-    result = fetch_all(config.axum_url, wallet_tuples)
-
-    # If all APIs failed, skip this interval entirely
-    if result.chain_tip is None:
-        logger.warning("All APIs failed — skipping snapshot for this interval")
-        return
-
-    # Host metrics (temp/CPU/RAM/load) — independent of node API
-    host = read_host_metrics()
-
     # Truncate to 10-min window
     now = int(time.time())
     timestamp = (now // 600) * 600
+
+    host = read_host_metrics()
+    write_kind_snapshot(db_path, "host", timestamp, asdict(host))
+
+    if config.blockchain is not None:
+        _collect_blockchain(config, db_path, timestamp)
+
+    for kind, reading in read_modules(config).items():
+        if not reading.ok:
+            logger.warning("%s: %s — skipping snapshot for this interval", kind, reading.error)
+            continue
+        write_kind_snapshot(db_path, kind, timestamp, reading.data)
+        logger.info(
+            "%s snapshot stored: peers=%s, memory=%sMB",
+            kind, reading.data.get("peers"), reading.data.get("memory_mb"),
+        )
+
+    # Prune after write
+    prune_old_snapshots(db_path)
+
+    logger.info(
+        "Host snapshot stored: temp=%s°C, cpu=%s%%, mem=%s%%",
+        host.cpu_temp, host.cpu_pct, host.mem_pct,
+    )
+
+
+def _collect_blockchain(config: Config, db_path: str, timestamp: int) -> None:
+    """Write a blockchain snapshot, unless every API endpoint failed."""
+    wallet_tuples = [(w.name, w.address) for w in config.blockchain.wallets]
+    result = fetch_all(config.blockchain.axum_url, wallet_tuples)
+
+    # If all APIs failed, skip this interval entirely
+    if result.chain_tip is None:
+        logger.warning("blockchain: all APIs failed — skipping snapshot for this interval")
+        return
 
     write_snapshot(
         db_path=db_path,
@@ -134,23 +162,13 @@ def _collect_and_store(config: Config, db_path: str) -> None:
         peer_count=result.peer_count,
         n_connections=result.n_connections,
         wallet_balances=result.wallet_balances,
-        cpu_temp=host.cpu_temp,
-        cpu_pct=host.cpu_pct,
-        mem_pct=host.mem_pct,
-        load1=host.load1,
     )
 
-    # Prune after write
-    prune_old_snapshots(db_path)
-
     logger.info(
-        "Snapshot stored: tip=%s, peers=%s, mempool=%s, temp=%s°C, cpu=%s%%, mem=%s%%, wallets=%s",
+        "blockchain snapshot stored: tip=%s, peers=%s, mempool=%s, wallets=%s",
         result.chain_tip,
         result.peer_count,
         result.mempool_depth,
-        host.cpu_temp,
-        host.cpu_pct,
-        host.mem_pct,
         result.wallet_balances,
     )
 
