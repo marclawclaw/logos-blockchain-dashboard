@@ -45,13 +45,14 @@ def test_config_loads_defaults(tmp_path):
     """Happy-path: config.yaml with manual overrides loads correctly."""
     config_yaml = tmp_path / "config.yaml"
     config_yaml.write_text(
-        "node:\n  axum_url: http://localhost:38437\n"
+        "blockchain:\n  axum_url: http://localhost:38437\n"
         "collector:\n  interval_minutes: 5\n"
     )
     from collector.config import load
     cfg = load(str(config_yaml))
-    assert cfg.axum_url == "http://localhost:38437"
+    assert cfg.blockchain.axum_url == "http://localhost:38437"
     assert cfg.interval_minutes == 5
+    assert cfg.kinds == ["blockchain"]
 
 
 def test_config_auto_detect_from_user_config(tmp_path):
@@ -64,21 +65,60 @@ def test_config_auto_detect_from_user_config(tmp_path):
     )
     # config.yaml points to the user config
     config_yaml = tmp_path / "config.yaml"
-    config_yaml.write_text(f"node_config_path: {user_cfg}\n")
+    config_yaml.write_text(f"blockchain:\n  node_config_path: {user_cfg}\n")
 
     from collector.config import load
     cfg = load(str(config_yaml))
-    assert cfg.axum_url == "http://localhost:38437"
-    assert len(cfg.wallets) == 1
-    assert cfg.wallets[0].name == "my_voucher_k"
+    assert cfg.blockchain.axum_url == "http://localhost:38437"
+    assert len(cfg.blockchain.wallets) == 1
+    assert cfg.blockchain.wallets[0].name == "my_voucher_k"
 
 
 def test_config_raises_on_missing_api_url(tmp_path):
-    """ConfigError raised when no API URL is available."""
+    """ConfigError raised when a blockchain node is configured but has no API URL."""
     config_yaml = tmp_path / "config.yaml"
-    config_yaml.write_text("node_config_path: /nonexistent/user_config.yaml\n")
+    config_yaml.write_text("blockchain:\n  node_config_path: /nonexistent/user_config.yaml\n")
     from collector.config import load, ConfigError
     with pytest.raises(ConfigError):
+        load(str(config_yaml))
+
+
+def test_config_no_kind_is_valid(tmp_path):
+    """No kind block at all: nothing is deployed, and that is not an error."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text("collector:\n  interval_minutes: 10\n")
+    from collector.config import load
+    cfg = load(str(config_yaml))
+    assert cfg.kinds == []
+    assert cfg.blockchain is None and cfg.storage is None and cfg.delivery is None
+
+
+def test_config_kind_deployed_only_if_block_present(tmp_path):
+    """A bare `storage:` deploys storage; delivery stays absent; enabled: false opts out."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(
+        "storage:\n"
+        "delivery:\n  enabled: false\n"
+        "logosctl:\n  command: [podman, exec, logos-core, logosctl]\n"
+    )
+    from collector.config import load
+    cfg = load(str(config_yaml))
+    assert cfg.kinds == ["storage"]
+    assert cfg.storage.module == "storage_module"
+    assert cfg.logosctl.command == ["podman", "exec", "logos-core", "logosctl"]
+
+
+@pytest.mark.parametrize("legacy", [
+    "node_config_path: ~/.config/logos-node/user_config.yaml\n",
+    "node:\n  axum_url: http://localhost:38437\n",
+    "wallets:\n  - name: a\n    address: b\n",
+])
+def test_config_rejects_pre_kind_top_level_keys(tmp_path, legacy):
+    """Keys from before kinds were explicit stop startup and name their new place."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(legacy)
+    from collector.config import load, ConfigError
+    with pytest.raises(ConfigError, match="blockchain"):
         load(str(config_yaml))
 
 
@@ -315,6 +355,11 @@ def test_db_retention_pruning(tmp_path):
 # Collector loop — graceful degradation
 # ---------------------------------------------------------------------------
 
+def _blockchain_config():
+    from collector.config import BlockchainConfig, Config
+    return Config(blockchain=BlockchainConfig(axum_url="http://localhost:38437"))
+
+
 def test_collector_continues_after_partial_api_failure(tmp_path):
     """Collector does not crash when one API endpoint fails; snapshot still written."""
     from collector.main import _collect_and_store
@@ -325,7 +370,7 @@ def test_collector_continues_after_partial_api_failure(tmp_path):
     db_path = str(tmp_path / "test.db")
     init_db(db_path)
 
-    config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
+    config = _blockchain_config()
 
     # First: write a prior snapshot
     now = int(time.time())
@@ -366,7 +411,7 @@ def test_collector_skips_snapshot_when_all_apis_fail_first_run(tmp_path):
     db_path = str(tmp_path / "test.db")
     init_db(db_path)
 
-    config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
+    config = _blockchain_config()
 
     # All endpoints fail → FetchResult with all None/defaults
     all_fail = FetchResult()
@@ -398,7 +443,7 @@ def test_collector_skips_snapshot_when_all_apis_fail_subsequent_run(tmp_path):
     ts0 = (now // 600) * 600 - 600
     write_snapshot(db_path, ts0, 1000, "lib0", "Normal", 50, 10, 5, 10, {})
 
-    config = Config(axum_url="http://localhost:38437", wallets=[], interval_minutes=10)
+    config = _blockchain_config()
     all_fail = FetchResult()
 
     with patch("collector.main.fetch_all", return_value=all_fail):

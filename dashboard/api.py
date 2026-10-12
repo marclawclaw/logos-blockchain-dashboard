@@ -23,18 +23,20 @@ def get_db_path() -> str:
     Resolves relative to the project root (parent of this file's parent)
     to work regardless of the current working directory.
     """
-    from collector.config import load
-    try:
-        cfg = load()
-        db = cfg.database
-    except Exception:
-        db = "data/snapshots.db"
-    
+    from flask import current_app
+    cfg = current_app.config.get("CONFIG")
+    db = cfg.database if cfg is not None else "data/snapshots.db"
+
     # Make absolute relative to project root (parent of dashboard/)
     if not os.path.isabs(db):
         project_root = Path(__file__).parent.parent
         db = str(project_root / db)
     return db
+
+
+def _since(hours: int) -> int:
+    # hours=0 means Max — return all available snapshots (no time filter)
+    return 0 if hours == 0 else int(time.time()) - (hours * 3600)
 
 
 @api.route("/snapshot/latest", methods=["GET"])
@@ -55,10 +57,26 @@ def snapshots():
     from collector.db import get_snapshots_since
     db_path = get_db_path()
     hours = int(request.args.get("hours", 24))
-    # hours=0 means Max — return all available snapshots (no time filter)
-    since = 0 if hours == 0 else int(time.time()) - (hours * 3600)
-    rows = get_snapshots_since(db_path, since)
+    rows = get_snapshots_since(db_path, _since(hours))
     return jsonify({"snapshots": rows, "count": len(rows)})
+
+
+@api.route("/history/<kind>", methods=["GET"])
+def history(kind):
+    """Return a kind's snapshots (storage, delivery or host) from the last N hours."""
+    from collector.db import KIND_TABLES, get_kind_snapshots_since
+    if kind not in KIND_TABLES:
+        return jsonify({"error": f"Unknown kind: {kind}"}), 404
+    hours = int(request.args.get("hours", 24))
+    rows = get_kind_snapshots_since(get_db_path(), kind, _since(hours))
+    return jsonify({"snapshots": rows, "count": len(rows)})
+
+
+@api.route("/live", methods=["GET"])
+def live():
+    """Current values of every deployed node kind and the host, from the live cache."""
+    from flask import current_app
+    return jsonify(current_app.config["LIVE"].get())
 
 
 @api.route("/blend/status", methods=["GET"])
@@ -68,7 +86,9 @@ def blend_status():
     from flask import current_app
     from . import blend
 
-    node_url = current_app.config.get("NODE_URL", "http://127.0.0.1:8080")
+    node_url = current_app.config.get("NODE_URL")
+    if node_url is None:
+        return jsonify({"error": "No blockchain node configured"}), 404
 
     def node_get(path):
         try:

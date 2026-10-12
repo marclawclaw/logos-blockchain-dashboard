@@ -1,16 +1,31 @@
-# Auto-detect wallets + API URL from node config
-node_config_path: "~/.config/logos-node/user_config.yaml"
+# Node kinds on this machine. A kind is polled and shown only if its block is
+# present; with none, the dashboard shows the host only. Put per-machine
+# settings in an untracked config.local.yaml next to this file.
 
-# Manual override (uncomment and fill if auto-detect is not available)
-# node:
-#   axum_url: "http://localhost:38437"
+# Blockchain node, read over its REST API.
+# blockchain:
+#   # Auto-detect the API URL and wallets from the node config
+#   node_config_path: "~/.config/logos-node/user_config.yaml"
+#   # Manual override (if auto-detect is not available)
+#   # axum_url: "http://localhost:38437"
+#   # Wallets (replace the auto-detected ones)
+#   # wallets:
+#   #   - name: "voucher"
+#   #     address: "e59ffc735020e875982dcf84906738224aae576ea9119714a6d1d44de96f6d16"
+#   #   - name: "funding"
+#   #     address: "d125ba0ff553f67726171fdd1c89941a07705c7cf1f43b5c8ba93e248a3c3507"
 
-# Wallet overrides (merge with or replace auto-detected wallets)
-# wallets:
-#   - name: "voucher"
-#     address: "e59ffc735020e875982dcf84906738224aae576ea9119714a6d1d44de96f6d16"
-#   - name: "funding"
-#     address: "d125ba0ff553f67726171fdd1c89941a07705c7cf1f43b5c8ba93e248a3c3507"
+# Storage and delivery nodes, read through logosctl (Logos Core modules).
+# storage:
+#   module: storage_module
+# delivery:
+#   module: delivery_module
+
+# How to run logosctl. The default expects it on PATH with a session that can
+# reach the daemon (see README, "Reaching Logos Core").
+# logosctl:
+#   command: ["logosctl"]
+#   timeout_seconds: 20
 
 collector:
   interval_minutes: 10
@@ -19,4 +34,4 @@ collector:
 dashboard:
   host: "0.0.0.0"
   port: 8282
-  refresh_seconds: 5
+  refresh_seconds: 30

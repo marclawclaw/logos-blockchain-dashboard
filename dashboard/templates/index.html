@@ -38,19 +38,27 @@
       background: var(--surface);
     }
     header h1 { font-size: 16px; font-weight: 600; color: var(--text); }
-    #status {
-      font-size: 12px;
-      color: var(--muted);
+    #status { font-size: 12px; color: var(--muted); }
+
+    /* Status strip: one chip per deployed node kind */
+    #chips {
       display: flex;
-      align-items: center;
-      gap: 6px;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 24px;
+      border-bottom: 1px solid var(--border);
     }
-    #status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--green);
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px; border-radius: 12px;
+      border: 1px solid var(--border); font-size: 12px; font-weight: 600;
     }
-    #status-dot.stale { background: var(--amber); }
-    #status-dot.error { background: var(--red); }
+    .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+    .chip.up .dot { background: var(--green); }
+    .chip.down .dot { background: var(--red); }
+    .chip.down { border-color: var(--red); }
+    .chip-note { color: var(--muted); font-weight: 400; }
+    .chip.empty { color: var(--muted); font-weight: 400; }
 
     /* Banner */
     #banner {
@@ -72,6 +80,16 @@
       gap: 16px;
       padding: 16px 24px;
     }
+    /* A kind's cards sit directly in the grid; the wrapper only groups them. */
+    .kind-section { display: contents; }
+    .section-title {
+      grid-column: 1 / -1;
+      font-size: 13px; font-weight: 600; color: var(--text);
+      padding-top: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;
+    }
+    /* Last known values of a node that is not answering */
+    .kind-section.stale .metric-value,
+    .kind-section.stale .wallet-balance { color: var(--muted); }
 
     /* Cards */
     .card {
@@ -94,11 +112,16 @@
       display: flex;
       justify-content: space-between;
       align-items: baseline;
+      gap: 12px;
       padding: 4px 0;
     }
-    .metric-label { color: var(--muted); font-size: 13px; }
-    .metric-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .metric-label { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .metric-value {
+      font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+      text-align: right; overflow-wrap: anywhere;
+    }
     .metric-value.unknown { color: var(--muted); font-style: italic; }
+    .metric-value.small { font-size: 12px; font-weight: 400; }
 
     /* Charts */
     .chart-card { grid-column: 1 / -1; }
@@ -126,9 +149,10 @@
     .pill.inactive, .pill.withdrawn { color: var(--amber); border-color: var(--amber); }
     .metric-value.ok { color: var(--green); }
     .metric-value.bad { color: var(--red); }
-    .blend-warning {
+    .blend-warning, .node-warning {
       display: none; margin-top: 8px; padding: 6px 8px; border-radius: 4px;
       border: 1px solid var(--red); color: var(--red); font-size: 12px;
+      overflow-wrap: anywhere;
     }
 
     /* Footer */
@@ -172,25 +196,41 @@
   </style>
 </head>
 <body>
+{% set kind_names = {'blockchain': 'Blockchain', 'storage': 'Storage', 'delivery': 'Delivery'} %}
+{% set wallet_notes = {
+  'stake': 'Stake key, genesis stake',
+  'voucher': 'VoucherMaster',
+  'funding': 'SdpFunding',
+  'pow': 'PoWClaim, auto-claimed mining rewards',
+} %}
 
 <header>
-  <h1>🟢 Logos Node Observer</h1>
+  <h1>Logos Node Observer</h1>
   <div class="timescale-group">
     <button class="timescale-btn active" data-scale="1d">1d</button>
     <button class="timescale-btn" data-scale="1w">1w</button>
     <button class="timescale-btn" data-scale="1m">1m</button>
     <button class="timescale-btn" data-scale="Max">Max</button>
-    <button class="timescale-btn" id="ip-toggle" title="Mask IP addresses (safe for screenshots)">Show IPs</button>
+    <button class="timescale-btn" id="ip-toggle" title="Mask IP addresses and peer IDs (safe for screenshots)">Show IPs</button>
   </div>
-  <div id="status">
-    <span id="status-dot"></span>
-    <span id="status-text">Connecting...</span>
-  </div>
+  <div id="status">Connecting...</div>
 </header>
+
+<div id="chips">
+  {% for kind in kinds %}
+  <span class="chip" id="chip-{{ kind }}"><span class="dot"></span>{{ kind_names[kind] }} <span class="chip-note">reading…</span></span>
+  {% else %}
+  <span class="chip empty">No node kind configured — showing the host only</span>
+  {% endfor %}
+</div>
 
 <div id="banner"></div>
 
 <div class="grid">
+
+{% if 'blockchain' in kinds %}
+<div class="kind-section" id="section-blockchain">
+  <div class="section-title">Blockchain node</div>
 
   <!-- Chain Overview -->
   <div class="card">
@@ -214,27 +254,14 @@
     <div class="metric"><span class="metric-label">Connections</span><span class="metric-value" id="connections">—</span></div>
   </div>
 
-  <!-- Wallets -->
+  <!-- Wallets: one card per wallet in the blockchain config -->
+  {% for name in wallets %}
   <div class="card">
-    <div class="card-title">Stake Wallet</div>
-    <div class="wallet-name">stake (Stake key, genesis stake)</div>
-    <div class="wallet-balance" id="wallet-stake">—</div>
+    <div class="card-title">{{ name }} wallet</div>
+    <div class="wallet-name">{{ wallet_notes.get(name, name) }}</div>
+    <div class="wallet-balance" data-wallet="{{ name }}">—</div>
   </div>
-  <div class="card">
-    <div class="card-title">Voucher Wallet</div>
-    <div class="wallet-name">voucher (VoucherMaster)</div>
-    <div class="wallet-balance" id="wallet-voucher">—</div>
-  </div>
-  <div class="card">
-    <div class="card-title">Funding Wallet</div>
-    <div class="wallet-name">funding (SdpFunding)</div>
-    <div class="wallet-balance" id="wallet-funding">—</div>
-  </div>
-  <div class="card">
-    <div class="card-title">PoW Rewards Wallet</div>
-    <div class="wallet-name">pow (PoWClaim, auto-claimed mining rewards)</div>
-    <div class="wallet-balance" id="wallet-pow">—</div>
-  </div>
+  {% endfor %}
 
   <!-- Blend Network -->
   <div class="card">
@@ -259,38 +286,155 @@
     <div class="card-title">Chain Tip Height</div>
     <div class="chart-wrap"><canvas id="chart-tip"></canvas></div>
   </div>
-
-
   <div class="card chart-card">
     <div class="card-title">Mempool Depth</div>
     <div class="chart-wrap"><canvas id="chart-mempool"></canvas></div>
   </div>
-
   <div class="card chart-card">
     <div class="card-title">Peer Count</div>
     <div class="chart-wrap"><canvas id="chart-peers"></canvas></div>
   </div>
-
-  <div class="card chart-card">
-    <h2>CPU Temperature (°C)</h2>
-    <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
-  </div>
-
-  <div class="card chart-card">
-    <h2>CPU Usage (%)</h2>
-    <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
-  </div>
-
-  <div class="card chart-card">
-    <h2>Memory Used (%) &amp; Load</h2>
-    <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
-  </div>
-
+  {% if wallets %}
   <div class="card chart-card">
     <div class="card-title">Wallet Balances</div>
     <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
   </div>
+  {% endif %}
+</div>
+{% endif %}
 
+{% if 'storage' in kinds %}
+<div class="kind-section" id="section-storage">
+  <div class="section-title">Storage node</div>
+
+  <div class="card">
+    <div class="card-title">Node</div>
+    <div class="metric"><span class="metric-label">Module</span><span class="metric-value" id="storage-module">—</span></div>
+    <div class="metric"><span class="metric-label">Node</span><span class="metric-value" id="storage-running">—</span></div>
+    <div class="metric"><span class="metric-label">Library version</span><span class="metric-value" id="storage-lib-version">—</span></div>
+    <div class="metric"><span class="metric-label">Network</span><span class="metric-value" id="storage-network">—</span></div>
+    <div class="metric"><span class="metric-label">Uptime</span><span class="metric-value" id="storage-uptime">—</span></div>
+    <div class="metric"><span class="metric-label">Peer ID</span><span class="metric-value small" id="storage-peer-id">—</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Storage</div>
+    <div class="metric"><span class="metric-label">Quota used</span><span class="metric-value" id="storage-quota-used">—</span></div>
+    <div class="metric"><span class="metric-label">Quota reserved</span><span class="metric-value" id="storage-quota-reserved">—</span></div>
+    <div class="metric"><span class="metric-label">Quota max</span><span class="metric-value" id="storage-quota-max">—</span></div>
+    <div class="metric"><span class="metric-label">Blocks</span><span class="metric-value" id="storage-blocks">—</span></div>
+    <div class="metric"><span class="metric-label">Files stored</span><span class="metric-value" id="storage-manifests">—</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Activity</div>
+    <div class="metric"><span class="metric-label">Connected peers</span><span class="metric-value" id="storage-peers">—</span></div>
+    <div class="metric"><span class="metric-label">Uploads</span><span class="metric-value" id="storage-uploads">—</span></div>
+    <div class="metric"><span class="metric-label">Downloads</span><span class="metric-value" id="storage-downloads">—</span></div>
+    <div class="metric"><span class="metric-label">Memory</span><span class="metric-value" id="storage-memory">—</span></div>
+    <div class="metric"><span class="metric-label">CPU time</span><span class="metric-value" id="storage-cpu">—</span></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Storage — Quota Used</div>
+    <div class="chart-wrap"><canvas id="chart-storage-quota"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Storage — Blocks &amp; Files Stored</div>
+    <div class="chart-wrap"><canvas id="chart-storage-content"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Storage — Blocks Served to Peers (per interval)</div>
+    <div class="chart-wrap"><canvas id="chart-storage-served"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Storage — Connected Peers</div>
+    <div class="chart-wrap"><canvas id="chart-storage-peers"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Storage — Memory (MB)</div>
+    <div class="chart-wrap"><canvas id="chart-storage-memory"></canvas></div>
+  </div>
+</div>
+{% endif %}
+
+{% if 'delivery' in kinds %}
+<div class="kind-section" id="section-delivery">
+  <div class="section-title">Delivery node</div>
+
+  <div class="card">
+    <div class="card-title">Node</div>
+    <div class="metric"><span class="metric-label">Module</span><span class="metric-value" id="delivery-module">—</span></div>
+    <div class="metric"><span class="metric-label">Node</span><span class="metric-value" id="delivery-running">—</span></div>
+    <div class="metric"><span class="metric-label">Node version</span><span class="metric-value" id="delivery-node-version">—</span></div>
+    <div class="metric"><span class="metric-label">Uptime</span><span class="metric-value" id="delivery-uptime">—</span></div>
+    <div class="metric"><span class="metric-label">Memory</span><span class="metric-value" id="delivery-memory">—</span></div>
+    <div class="metric"><span class="metric-label">CPU time</span><span class="metric-value" id="delivery-cpu">—</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Connectivity</div>
+    <div class="metric"><span class="metric-label">Connection</span><span class="metric-value" id="delivery-connection">—</span></div>
+    <div class="metric"><span class="metric-label">Peers</span><span class="metric-value" id="delivery-peers">—</span></div>
+    <div class="metric"><span class="metric-label">Rate limit (RLN)</span><span class="metric-value" id="delivery-rln">—</span></div>
+    <div class="node-warning" id="delivery-rln-warning"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Traffic since node start</div>
+    <div class="metric"><span class="metric-label">Bytes in</span><span class="metric-value" id="delivery-bytes-in">—</span></div>
+    <div class="metric"><span class="metric-label">Bytes out</span><span class="metric-value" id="delivery-bytes-out">—</span></div>
+    <div class="metric"><span class="metric-label">Messages in</span><span class="metric-value" id="delivery-messages-in">—</span></div>
+    <div class="metric"><span class="metric-label">Messages out</span><span class="metric-value" id="delivery-messages-out">—</span></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Delivery — Peers</div>
+    <div class="chart-wrap"><canvas id="chart-delivery-peers"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Delivery — Bytes (per interval)</div>
+    <div class="chart-wrap"><canvas id="chart-delivery-bytes"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Delivery — Messages (per interval)</div>
+    <div class="chart-wrap"><canvas id="chart-delivery-messages"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Delivery — Connection Status</div>
+    <div class="chart-wrap"><canvas id="chart-delivery-connection"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Delivery — Memory (MB)</div>
+    <div class="chart-wrap"><canvas id="chart-delivery-memory"></canvas></div>
+  </div>
+</div>
+{% endif %}
+
+<div class="kind-section" id="section-host">
+  <div class="section-title">Host</div>
+
+  <div class="card">
+    <div class="card-title">Host</div>
+    <div class="metric"><span class="metric-label">CPU temperature</span><span class="metric-value" id="host-temp">—</span></div>
+    <div class="metric"><span class="metric-label">CPU usage</span><span class="metric-value" id="host-cpu">—</span></div>
+    <div class="metric"><span class="metric-label">Memory used</span><span class="metric-value" id="host-mem">—</span></div>
+    <div class="metric"><span class="metric-label">Load (1m)</span><span class="metric-value" id="host-load">—</span></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">CPU Temperature (°C)</div>
+    <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">CPU Usage (%)</div>
+    <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Memory Used (%) &amp; Load</div>
+    <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
+  </div>
+</div>
 
 </div>
 
@@ -301,52 +445,51 @@
 
 <script type="module">
 import { initVisibilityPolling } from '/static/refresh.js';
+import { buildSeries, field, delta, fmtBytes, fmtDuration } from '/static/series.js';
+
 // ─────────────────────────────────────────────────────────────
-// State
+// Server-side config
 // ─────────────────────────────────────────────────────────────
-let charts = {};
-let lastSnapshot = null;
-let refreshInterval = null;
-let lastLiveFetch = null;           // Unix timestamp of last successful node-API fetch
-const REFRESH_MS = 5000;            // 5 seconds when page is visible
+const KINDS = {{ kinds | tojson }};                    // deployed node kinds
+const WALLET_NAMES = {{ wallets | tojson }};           // from the blockchain config
+const REFRESH_MS = {{ refresh_seconds }} * 1000;       // current values, all kinds
+const INTERVAL_SECS = {{ interval_seconds }};          // collector snapshot interval
+// Snapshots further apart than this have a hole between them (a missed interval).
+const MAX_GAP_SECS = Math.max(INTERVAL_SECS * 2.5, 1500);
+// 90 days of 10-minute snapshots, plus room for live points.
+const MAX_POINTS = 14000;
+
 const API_BASE = '/api';
-// Logos node API proxied via Flask (avoids CORS) (from server-side config)
-// Time scale options: maps button label to hours sent to GET /api/snapshots?hours=N
+// Time scale options: maps button label to hours sent to the history endpoints
 const TIME_SCALES = { '1d': 24, '1w': 168, '1m': 720, 'Max': 0 };
 const BLEND_REFRESH_MS = 60000;     // declarations change per epoch, no need to poll fast
-// name -> address, for live wallet-balance polling via the node proxy.
-// Keep in sync with config.local.yaml wallets and the wallet-<name> card ids.
-const WALLETS = {
-  // Testnet v0.3 relaunch (module 0.3.1, 2026-10-10): keys from the node's keystore.yaml public_keys.
-  stake: 'b76801e8ef95cc21ef3bb6434167766c7a9760cb976ef630245c8f0419c1a521',
-  voucher: '20903a167971f2baf047e3c2601c8b0c9625549abee9729dae05f22bb125960f',
-  funding: '896a829ad3c3fd1f899101985674f456591274a4a1a784fb5913db621f029707',
-  pow: '409be493b2cb020c25536ec0b643fcdf8e8cb52f165c1ce7baba696b9e979e13',
-};
-let selectedScale = '1d';          // default time scale
+let selectedScale = '1d';           // default time scale
+
+const COLORS = ['#58a6ff', '#3fb950', '#d29922', '#bc8cff', '#f85149'];
 
 // ─────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────
 // Chart x-axis label, e.g. "6 Oct 14:05:23". Includes the date so multi-day
-// scales are readable, and seconds so labels stay unique: pushPoint() dedupes
-// on the label, and live points arrive every few seconds.
+// scales are readable.
 function localTime(epochSec) {
-  if (!epochSec) return '—';
+  if (!epochSec) return '';
   const d = new Date(epochSec * 1000);
   const date = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   return `${date} ${time}`;
 }
 
-function setUnknown(el, text) {
-  el.textContent = text ?? '—';
-  el.classList.toggle('unknown', true);
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const missing = val == null || val === '';
+  el.textContent = missing ? '—' : val;
+  el.classList.toggle('unknown', missing);
 }
 
-function setVal(el, val) {
-  el.textContent = val ?? '—';
-  el.classList.toggle('unknown', !val && val !== 0);
+function num(v) {
+  return v == null ? null : Number(v).toLocaleString();
 }
 
 function showBanner(msg, cls) {
@@ -360,301 +503,353 @@ function hideBanner() {
   document.getElementById('banner').style.display = 'none';
 }
 
+function balancesOf(row) {
+  const b = row.wallet_balances;
+  if (b && typeof b === 'object') return b;
+  try { return JSON.parse(b || '{}'); } catch (_) { return {}; }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Charts
 // ─────────────────────────────────────────────────────────────
-function makeChart(id, label, color) {
-  const ctx = document.getElementById(id).getContext('2d');
-  return new Chart(ctx, {
+// Each chart is described by its series. A series has a label and a value
+// function (row, prevRow) => number|null; `delta` series (growth of a counter
+// between two snapshots) only make sense between stored snapshots, so they are
+// not extended with live points.
+const walletValue = (name) => (row) => {
+  // Missing or zero balances become null (a gap): the log scale cannot plot 0.
+  const v = Number(balancesOf(row)[name]);
+  return v > 0 ? v : null;
+};
+
+const CHART_DEFS = {
+  blockchain: [
+    { id: 'chart-tip', series: [{ label: 'Chain Tip', value: field('chain_tip') }] },
+    { id: 'chart-mempool', series: [{ label: 'Pending Tx', value: field('mempool_depth'), color: '#d29922' }] },
+    { id: 'chart-peers', series: [{ label: 'Peers', value: field('peer_count'), color: '#bc8cff' }] },
+    // Log scale: balances span many orders of magnitude (faucet-era 1e12
+    // vs PoW rewards ~1e8), which flattens the small ones on a linear axis.
+    { id: 'chart-wallets', log: true, noFill: true,
+      series: WALLET_NAMES.map((name) => ({ label: name, value: walletValue(name) })) },
+  ],
+  storage: [
+    { id: 'chart-storage-quota', yFormat: fmtBytes,
+      series: [{ label: 'Quota used', value: field('quota_used_bytes') }] },
+    { id: 'chart-storage-content', series: [
+      { label: 'Blocks', value: field('blocks') },
+      { label: 'Files stored', value: field('manifests'), axis: 'y1' },
+    ] },
+    { id: 'chart-storage-served', series: [
+      { label: 'Blocks served to peers', value: delta('blocks_sent_total'), live: false, color: '#3fb950' },
+    ] },
+    { id: 'chart-storage-peers', series: [{ label: 'Connected peers', value: field('peers'), color: '#bc8cff' }] },
+    { id: 'chart-storage-memory', series: [{ label: 'Memory (MB)', value: field('memory_mb'), color: '#d29922' }] },
+  ],
+  delivery: [
+    { id: 'chart-delivery-peers', series: [{ label: 'Peers', value: field('peers'), color: '#bc8cff' }] },
+    { id: 'chart-delivery-bytes', yFormat: fmtBytes, noFill: true, series: [
+      { label: 'Bytes in', value: delta('bytes_in_total'), live: false },
+      { label: 'Bytes out', value: delta('bytes_out_total'), live: false },
+    ] },
+    { id: 'chart-delivery-messages', noFill: true, series: [
+      { label: 'Messages in', value: delta('messages_in_total'), live: false },
+      { label: 'Messages out', value: delta('messages_out_total'), live: false },
+    ] },
+    { id: 'chart-delivery-connection', stepped: true,
+      yFormat: (v) => (v === 1 ? 'Connected' : v === 0 ? 'Not connected' : ''),
+      series: [{ label: 'Connected', color: '#3fb950',
+        value: (row) => (row.connection_status == null ? null : row.connection_status === 'Connected' ? 1 : 0) }] },
+    { id: 'chart-delivery-memory', series: [{ label: 'Memory (MB)', value: field('memory_mb'), color: '#d29922' }] },
+  ],
+  host: [
+    { id: 'chart-temp', series: [{ label: 'CPU Temp', value: field('cpu_temp'), color: '#f85149' }] },
+    { id: 'chart-cpu', series: [{ label: 'CPU %', value: field('cpu_pct'), color: '#3fb950' }] },
+    { id: 'chart-mem', series: [
+      { label: 'Mem %', value: field('mem_pct'), color: '#d29922' },
+      { label: 'Load (1m)', value: field('load1'), color: '#58a6ff', axis: 'y1', noFill: true },
+    ] },
+  ],
+};
+
+// kind -> [{ def, chart, lastTs, lastRow }]
+const charts = {};
+
+function makeChart(def) {
+  const canvas = document.getElementById(def.id);
+  if (!canvas) return null;
+  const multi = def.series.length > 1;
+  const hasY1 = def.series.some((s) => s.axis === 'y1');
+  const tick = { color: '#8b949e' };
+  const yTicks = def.log
+    ? { ...tick, callback: (v) => Number.isInteger(Math.log10(v))
+        ? Number(v).toLocaleString(undefined, { notation: 'compact' }) : '' }
+    : def.yFormat ? { ...tick, callback: (v) => def.yFormat(v) } : tick;
+  if (def.stepped) yTicks.stepSize = 1;
+  const scales = {
+    x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
+    y: def.log
+      ? { type: 'logarithmic', grid: { color: '#30363d' }, ticks: yTicks }
+      : { grid: { color: '#30363d' }, ticks: yTicks, beginAtZero: true, position: 'left' },
+  };
+  if (hasY1) scales.y1 = { grid: { display: false }, ticks: tick, beginAtZero: true, position: 'right' };
+
+  const chart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
       labels: [],
-      datasets: [{
-        label,
-        data: [],
-        borderColor: color,
-        backgroundColor: color + '22',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.2,
-        fill: true,
-      }],
+      datasets: def.series.map((s, i) => {
+        const color = s.color || COLORS[i % COLORS.length];
+        return {
+          label: s.label, data: [], borderColor: color, backgroundColor: color + '22',
+          borderWidth: 1.5, pointRadius: 0, tension: def.stepped ? 0 : 0.2,
+          stepped: !!def.stepped,
+          fill: !(def.noFill || s.noFill),
+          spanGaps: false,                   // a null point is a real hole in the data
+          yAxisID: s.axis || 'y',
+        };
+      }),
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: {
-          grid: { color: '#30363d' },
-          ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true },
-        },
-        y: {
-          grid: { color: '#30363d' },
-          ticks: { color: '#8b949e' },
-          beginAtZero: true,
-        },
-      },
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: multi, labels: { color: '#8b949e' } } },
+      scales,
     },
   });
+  return { def, chart, lastTs: null, lastRow: null };
 }
 
-// Wallet chart: one dataset per wallet sharing the label axis. pushPoint() only
-// writes datasets[0], which piled every wallet onto the first line. Missing or
-// zero balances become null (a gap): the log scale cannot plot 0.
-function pushWallets(chart, timestamp, balances) {
-  const label = localTime(timestamp);
-  let idx = chart.data.labels.indexOf(label);
-  if (idx === -1) {
-    chart.data.labels.push(label);
-    for (const ds of chart.data.datasets) ds.data.push(null);
-    idx = chart.data.labels.length - 1;
-  }
-  for (const ds of chart.data.datasets) {
-    const v = Number(balances[ds.label]);
-    if (v > 0) ds.data[idx] = v;
-  }
-  if (chart.data.labels.length > 200) {
+function trim(entry) {
+  const { chart } = entry;
+  while (chart.data.labels.length > MAX_POINTS) {
     chart.data.labels.shift();
     for (const ds of chart.data.datasets) ds.data.shift();
   }
-  chart.update('none');
 }
 
-function pushPoint(chart, timestamp, value) {
-  // Skip if this timestamp already exists (avoids duplicate labels from init race)
-  if (chart.data.labels.includes(localTime(timestamp))) return;
-  chart.data.labels.push(localTime(timestamp));
-  chart.data.datasets[0].data.push(value);
-  if (chart.data.labels.length > 200) {
-    chart.data.labels.shift();
-    chart.data.datasets[0].data.shift();
-  }
-  chart.update('none');
-}
-
-// ─────────────────────────────────────────────────────────────
-// API
-// ─────────────────────────────────────────────────────────────
-// Node 0.1.x returned mode as a string ("Bootstrapping"); 0.2.0 returns an
-// object like {"Started":"Bootstrapping"} or {"Online":null}. Reduce to a name.
-function normalizeMode(mode) {
-  if (mode == null) return 'unknown';
-  if (typeof mode === 'string') return mode;
-  if (typeof mode === 'object') {
-    const [key, value] = Object.entries(mode)[0] || ['unknown', null];
-    return (typeof value === 'string' && value) ? value : key;
-  }
-  return String(mode);
-}
-
-async function fetchLatest() {
-  // Poll the Logos node APIs directly for live data
-  try {
-    const [infoRes, netRes, memRes] = await Promise.all([
-      fetch("/api/proxy/cryptarchia/info"),
-      fetch("/api/proxy/network/info"),
-      fetch("/api/proxy/mantle/metrics"),
-    ]);
-
-    if (!infoRes.ok || !netRes.ok || !memRes.ok) throw new Error('Node API error');
-
-    const infoRaw = await infoRes.json();
-    // Node 0.2.0 nests consensus fields under "cryptarchia_info" and moves
-    // "mode" to the top level; 0.1.x was flat. 0.2.3 renames it to "state"
-    // (a plain string) inside cryptarchia_info and adds a top-level "phase"
-    // ("InitialBlockDownload", etc). Support all three.
-    const info = infoRaw.cryptarchia_info || infoRaw;
-    const rawMode = infoRaw.mode != null ? infoRaw.mode
-      : info.mode != null ? info.mode
-      : info.state != null ? info.state
-      : infoRaw.phase;
-    const modeVal = normalizeMode(rawMode);
-    const net = await netRes.json();
-    const mem = await memRes.json();
-
-    lastLiveFetch = Math.floor(Date.now() / 1000);
-
-    // Wallet balances are not in the node info endpoints — pull each wallet
-    // via the proxy. Failures are non-fatal (a wallet may be unknown to the node).
-    const balances = {};
-    await Promise.all(Object.entries(WALLETS).map(async ([name, addr]) => {
-      try {
-        const r = await fetch(`/api/proxy/wallet/${addr}/balance`);
-        if (r.ok) { const b = await r.json(); if (b && b.balance != null) balances[name] = b.balance; }
-      } catch (_) {}
-    }));
-
-    return {
-      _ts: lastLiveFetch,
-      chain_tip: info.height,
-      mode: modeVal,
-      epoch: info.slot,
-      lib: info.lib,
-      peer_count: net.n_peers,
-      n_connections: net.n_connections,
-      mempool_depth: mem.pending_items,
-      mempool_last_ms: mem.last_item_timestamp,   // ms epoch of newest mempool item
-      wallet_balances: JSON.stringify(balances),
-    };
-  } catch (e) {
-    return null;
+// Replace a kind's chart contents with stored snapshots.
+function seedCharts(kind, rows) {
+  for (const entry of charts[kind] || []) {
+    const { timestamps, series } = buildSeries(rows, entry.def.series.map((s) => s.value), MAX_GAP_SECS);
+    entry.chart.data.labels = timestamps.map(localTime);
+    entry.chart.data.datasets.forEach((ds, i) => { ds.data = series[i]; });
+    entry.lastRow = rows.length ? rows[rows.length - 1] : null;
+    entry.lastTs = entry.lastRow ? entry.lastRow.timestamp : null;
+    trim(entry);
+    entry.chart.update('none');
   }
 }
 
-async function fetchHistory(hours) {
-  try {
-    const r = await fetch(`${API_BASE}/snapshots?hours=${hours}`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  } catch (e) {
-    return { snapshots: [] };
-  }
-}
-
-function clearCharts() {
-  // Reset all chart datasets to empty — called before re-fetching on time scale change
-  for (const chart of Object.values(charts)) {
-    if (!chart) continue;
-    for (const ds of chart.data.datasets) {
-      ds.data = [];
+// Append one live reading to a kind's charts.
+function pushLive(kind, ts, row) {
+  for (const entry of charts[kind] || []) {
+    if (entry.lastTs != null && ts <= entry.lastTs) continue;
+    const { chart, def } = entry;
+    if (entry.lastTs != null && ts - entry.lastTs > MAX_GAP_SECS) {
+      chart.data.labels.push('');
+      for (const ds of chart.data.datasets) ds.data.push(null);
     }
-    chart.data.labels = [];
+    chart.data.labels.push(localTime(ts));
+    def.series.forEach((s, i) => {
+      chart.data.datasets[i].data.push(s.live === false ? null : (s.value(row, null) ?? null));
+    });
+    entry.lastTs = ts;
+    trim(entry);
     chart.update('none');
   }
 }
 
-async function loadHistory(scale) {
-  clearCharts();
-  const hours = TIME_SCALES[scale] ?? 24;
-  const data = await fetchHistory(hours);
-  updateHistory(data);
-}
-
 // ─────────────────────────────────────────────────────────────
-// Update UI
+// History
 // ─────────────────────────────────────────────────────────────
-function updateLatest(snap) {
-  const dot = document.getElementById('status-dot');
-  const txt = document.getElementById('status-text');
-
-  if (!snap) {
-    // No live data available — fall back to snapshot data
-    if (lastSnapshot) {
-      // Node unreachable but we have a recent snapshot — show it and warn
-      const snapAge = Date.now() / 1000 - lastSnapshot.timestamp;
-      if (snapAge > 900) {  // 15 min — beyond collector interval + buffer
-        showBanner('Node unreachable — showing last known data (may be stale).', 'error');
-        dot.className = 'error';
-        txt.textContent = 'Offline';
-      } else {
-        hideBanner();
-        dot.className = 'stale';
-        txt.textContent = 'Reconnecting...';
-      }
-      // Display snapshot values (last known)
-      renderSnapshot(lastSnapshot);
-    } else {
-      showBanner('Node unreachable — cannot connect to APIs. Check node status and config.', 'error');
-      dot.className = 'error';
-      txt.textContent = 'Offline';
-    }
-    return;
-  }
-
-  hideBanner();
-  lastSnapshot = snap;  // cache for when node goes down
-
-  renderSnapshot(snap);
-
-  // Status — always Live when we have a recent live fetch
-  dot.className = '';
-  txt.textContent = 'Live';
-
-  document.getElementById('refresh-info').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-}
-
-function renderSnapshot(snap) {
-  const ts = snap._ts ?? snap.timestamp;
-
-  // Chain
-  setVal(document.getElementById('chain-tip'), snap.chain_tip);
-  setVal(document.getElementById('chain-slot'), snap.epoch);
-  setVal(document.getElementById('chain-mode'), snap.mode || '—');
-
-  // Mempool
-  setVal(document.getElementById('mempool-depth'), snap.mempool_depth);
-  const ageEl = document.getElementById('mempool-age');
-  if (snap.mempool_last_ms) {
-    // Was keyed on a mempool_age_ms field nothing ever set, so it always showed "—".
-    const secs = Math.max(0, Math.floor((Date.now() - snap.mempool_last_ms) / 1000));
-    ageEl.textContent = secs < 60 ? `${secs}s ago`
-      : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`;
-    ageEl.classList.remove('unknown');
-  } else {
-    setUnknown(ageEl);
-  }
-
-  // Network
-  setVal(document.getElementById('peer-count'), snap.peer_count);
-  setVal(document.getElementById('connections'), snap.n_connections || '—');
-
-  // Wallet balances
-  let balances = {};
+async function fetchRows(url) {
   try {
-    balances = JSON.parse(snap.wallet_balances || '{}');
-  } catch (_) {}
-
-  for (const [name, val] of Object.entries(balances)) {
-    const el = document.getElementById(`wallet-${name}`);
-    if (el) setVal(el, val != null ? Number(val).toLocaleString() : '—');
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return (await r.json()).snapshots || [];
+  } catch (e) {
+    return [];
   }
-
-  // Push to charts
-  if (charts.tip) pushPoint(charts.tip, ts, snap.chain_tip);
-  if (charts.blocks) pushPoint(charts.blocks, ts, snap.blocks_produced);
-  if (charts.mempool) pushPoint(charts.mempool, ts, snap.mempool_depth);
-  if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
-
-  // Wallet chart
-  if (charts.wallets) pushWallets(charts.wallets, ts, balances);
 }
 
-function updateHistory(data) {
-  const snaps = data.snapshots || [];
-  document.getElementById('snapshot-count').textContent = `${snaps.length} snapshots`;
+async function loadHistory(scale) {
+  const hours = TIME_SCALES[scale] ?? 24;
+  const kinds = [...KINDS, 'host'];
+  const all = await Promise.all(kinds.map((kind) => fetchRows(
+    kind === 'blockchain' ? `${API_BASE}/snapshots?hours=${hours}` : `${API_BASE}/history/${kind}?hours=${hours}`)));
 
-  if (snaps.length === 0) {
-    showBanner('Collecting data — first snapshot in approximately 10 minutes', 'info');
-    return;
-  }
+  let most = 0;
+  kinds.forEach((kind, i) => {
+    seedCharts(kind, all[i]);
+    most = Math.max(most, all[i].length);
+  });
+  document.getElementById('snapshot-count').textContent = `${most} snapshots`;
 
-  if (snaps.length < 6) {
-    showBanner(`Very little data — graphs become meaningful after a few hours (${snaps.length} snapshot${snaps.length===1?'':'s'} available)`, 'info');
+  if (most === 0) {
+    showBanner(`Collecting data — first snapshot in approximately ${Math.round(INTERVAL_SECS / 60)} minutes`, 'info');
+  } else if (most < 6) {
+    showBanner(`Very little data — graphs become meaningful after a few hours (${most} snapshot${most === 1 ? '' : 's'} available)`, 'info');
   } else {
     hideBanner();
   }
+}
 
-  // Seed charts with history
-  for (const snap of snaps) {
-    const ts = snap.timestamp;
-    if (charts.tip) pushPoint(charts.tip, ts, snap.chain_tip);
-    if (charts.mempool) pushPoint(charts.mempool, ts, snap.mempool_depth);
-    if (charts.peers) pushPoint(charts.peers, ts, snap.peer_count);
-    if (charts.temp && snap.cpu_temp != null) pushPoint(charts.temp, ts, snap.cpu_temp);
-    if (charts.cpu && snap.cpu_pct != null) pushPoint(charts.cpu, ts, snap.cpu_pct);
-    if (charts.mem && (snap.mem_pct != null || snap.load1 != null)) {
-      charts.mem.data.labels.push(localTime(ts));
-      charts.mem.data.datasets[0].data.push(snap.mem_pct);
-      charts.mem.data.datasets[1].data.push(snap.load1);
-      if (charts.mem.data.labels.length > 200) { charts.mem.data.labels.shift(); charts.mem.data.datasets[0].data.shift(); charts.mem.data.datasets[1].data.shift(); }
-      charts.mem.update('none');
-    }
-    let balances = {};
-    try { balances = JSON.parse(snap.wallet_balances || '{}'); } catch (_) {}
-    if (charts.wallets) pushWallets(charts.wallets, ts, balances);
+// ─────────────────────────────────────────────────────────────
+// Current values
+// ─────────────────────────────────────────────────────────────
+const IP_PREF_KEY = 'showIps';
+// IPs and peer IDs are masked by default so screenshots are safe; the toggle is remembered per browser.
+let showIps = false;
+try { showIps = localStorage.getItem(IP_PREF_KEY) === '1'; } catch (_) {}
+let lastBlend = null;
+let lastLive = null;
+
+function fmtIp(ip) {
+  if (!ip) return ip;
+  return showIps ? ip : '•••.•••.•••.•••';
+}
+
+function fmtId(id) {
+  if (!id) return id;
+  return showIps ? id : '••••••••••••';
+}
+
+function moduleLabel(d) {
+  if (!d.module_status) return null;
+  return d.module_version ? `${d.module_status} (v${d.module_version})` : d.module_status;
+}
+
+function runningLabel(d) {
+  return d.running == null ? null : d.running ? 'running' : 'stopped';
+}
+
+const RENDERERS = {
+  blockchain(d) {
+    setVal('chain-tip', d.chain_tip);
+    setVal('chain-slot', d.epoch);
+    setVal('chain-mode', d.mode);
+    setVal('mempool-depth', d.mempool_depth);
+    setVal('mempool-age', d.mempool_last_ms
+      ? `${fmtDuration((Date.now() - d.mempool_last_ms) / 1000)} ago` : null);
+    setVal('peer-count', d.peer_count);
+    setVal('connections', d.n_connections || null);
+    const balances = balancesOf(d);
+    document.querySelectorAll('[data-wallet]').forEach((el) => {
+      const v = balances[el.dataset.wallet];
+      el.textContent = v != null ? Number(v).toLocaleString() : '—';
+    });
+  },
+
+  storage(d) {
+    setVal('storage-module', moduleLabel(d));
+    setVal('storage-running', runningLabel(d));
+    setVal('storage-lib-version', d.lib_version);
+    setVal('storage-network', d.network);
+    setVal('storage-uptime', fmtDuration(d.uptime_seconds));
+    setVal('storage-peer-id', fmtId(d.peer_id));
+    setVal('storage-quota-used', fmtBytes(d.quota_used_bytes));
+    setVal('storage-quota-reserved', fmtBytes(d.quota_reserved_bytes));
+    setVal('storage-quota-max', fmtBytes(d.quota_max_bytes));
+    setVal('storage-blocks', num(d.blocks));
+    setVal('storage-manifests', num(d.manifests));
+    setVal('storage-peers', num(d.peers));
+    setVal('storage-uploads', num(d.uploads_total));
+    setVal('storage-downloads', num(d.downloads_total));
+    setVal('storage-memory', d.memory_mb != null ? `${Number(d.memory_mb).toFixed(0)} MB` : null);
+    setVal('storage-cpu', fmtDuration(d.cpu_seconds));
+  },
+
+  delivery(d) {
+    setVal('delivery-module', moduleLabel(d));
+    setVal('delivery-running', runningLabel(d));
+    setVal('delivery-node-version', d.node_version);
+    setVal('delivery-uptime', fmtDuration(d.uptime_seconds));
+    setVal('delivery-memory', d.memory_mb != null ? `${Number(d.memory_mb).toFixed(0)} MB` : null);
+    setVal('delivery-cpu', fmtDuration(d.cpu_seconds));
+
+    setVal('delivery-connection', d.connection_status);
+    const conn = document.getElementById('delivery-connection');
+    conn.classList.toggle('ok', d.connection_status === 'Connected');
+    conn.classList.toggle('bad', d.connection_status != null && d.connection_status !== 'Connected');
+    setVal('delivery-peers', num(d.peers));
+
+    setVal('delivery-rln', d.rln_state);
+    const rln = document.getElementById('delivery-rln');
+    rln.classList.toggle('ok', d.rln_state === 'Ready');
+    rln.classList.toggle('bad', d.rln_state === 'Failed');
+    const warn = document.getElementById('delivery-rln-warning');
+    warn.textContent = d.rln_state === 'Failed' ? (d.rln_message || 'Rate limiting failed to start.') : '';
+    warn.style.display = d.rln_state === 'Failed' ? 'block' : 'none';
+
+    setVal('delivery-bytes-in', fmtBytes(d.bytes_in_total));
+    setVal('delivery-bytes-out', fmtBytes(d.bytes_out_total));
+    setVal('delivery-messages-in', num(d.messages_in_total));
+    setVal('delivery-messages-out', num(d.messages_out_total));
+  },
+};
+
+function renderHost(h) {
+  setVal('host-temp', h.cpu_temp != null ? `${h.cpu_temp} °C` : null);
+  setVal('host-cpu', h.cpu_pct != null ? `${h.cpu_pct} %` : null);
+  setVal('host-mem', h.mem_pct != null ? `${h.mem_pct} %` : null);
+  setVal('host-load', h.load1);
+}
+
+function renderChip(kind, state) {
+  const chip = document.getElementById(`chip-${kind}`);
+  if (!chip) return;
+  chip.classList.toggle('up', state.status === 'up');
+  chip.classList.toggle('down', state.status === 'down');
+  const note = chip.querySelector('.chip-note');
+  chip.title = state.error || '';
+  if (state.status === 'up') {
+    note.textContent = 'up';
+  } else if (state.status === 'down') {
+    const seen = state.last_ok_at
+      ? `last seen ${fmtDuration(Date.now() / 1000 - state.last_ok_at)} ago` : 'never seen';
+    note.textContent = `not answering · ${seen}`;
+  } else {
+    note.textContent = 'reading…';
   }
+}
+
+function renderLive(live) {
+  lastLive = live;
+  for (const kind of KINDS) {
+    const state = (live.kinds || {})[kind];
+    if (!state) continue;
+    renderChip(kind, state);
+    // A node that is not answering keeps its last known values, shown dimmed.
+    document.getElementById(`section-${kind}`).classList.toggle('stale', state.status !== 'up');
+    if (state.data) RENDERERS[kind](state.data);
+    if (state.status === 'up' && state.data) pushLive(kind, state.last_ok_at, state.data);
+  }
+  if (live.host) {
+    renderHost(live.host);
+    if (live.refreshed_at) pushLive('host', live.refreshed_at, live.host);
+  }
+  document.getElementById('status').textContent = live.refreshed_at
+    ? `Read ${new Date(live.refreshed_at * 1000).toLocaleTimeString()}` : 'Reading nodes…';
+  document.getElementById('refresh-info').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+}
+
+let retryTimer = null;
+
+async function refresh() {
+  let live;
+  try {
+    const r = await fetch(`${API_BASE}/live`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    live = await r.json();
+  } catch (e) {
+    document.getElementById('status').textContent = 'Dashboard unreachable';
+    return;
+  }
+  renderLive(live);
+
+  // The first request only starts the reading; fetch the result shortly after.
+  const pending = !live.refreshed_at;
+  clearTimeout(retryTimer);
+  if (pending && !document.hidden) retryTimer = setTimeout(refresh, 3000);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -664,16 +859,6 @@ const BLEND_STATUS_LABELS = {
   active: 'Active', pending: 'Pending activation', inactive: 'Inactive',
   withdrawn: 'Withdrawn', not_declared: 'Not declared',
 };
-const IP_PREF_KEY = 'showIps';
-// IPs are masked by default so screenshots are safe; the toggle is remembered per browser.
-let showIps = false;
-try { showIps = localStorage.getItem(IP_PREF_KEY) === '1'; } catch (_) {}
-let lastBlend = null;
-
-function fmtIp(ip) {
-  if (!ip) return ip;
-  return showIps ? ip : '•••.•••.•••.•••';
-}
 
 function setShowIps(on) {
   showIps = on;
@@ -682,6 +867,12 @@ function setShowIps(on) {
   btn.textContent = on ? 'Hide IPs' : 'Show IPs';
   btn.classList.toggle('active', on);
   if (lastBlend) renderBlend(lastBlend);
+  if (lastLive) {
+    for (const kind of KINDS) {
+      const state = (lastLive.kinds || {})[kind];
+      if (state && state.data) RENDERERS[kind](state.data);
+    }
+  }
 }
 
 async function refreshBlend() {
@@ -690,7 +881,7 @@ async function refreshBlend() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     lastBlend = await r.json();
   } catch (e) {
-    setUnknown(document.getElementById('blend-status'), 'unavailable');
+    setVal('blend-status', 'unavailable');
     return;
   }
   renderBlend(lastBlend);
@@ -702,18 +893,17 @@ function renderBlend(data) {
 
   const statusEl = document.getElementById('blend-status');
   statusEl.innerHTML = '';
+  statusEl.classList.remove('unknown');
   const pill = document.createElement('span');
   pill.className = `pill ${node.status}`;
   pill.textContent = BLEND_STATUS_LABELS[node.status] || node.status;
   if (node.status === 'pending' && node.activates_at != null) pill.textContent += ` (epoch ${node.activates_at})`;
   statusEl.appendChild(pill);
 
-  setVal(document.getElementById('blend-epochs'),
-    node.declared ? `${node.created ?? '—'} / ${node.active ?? '—'}` : '—');
-  setVal(document.getElementById('blend-reg-ip'),
-    node.registered_ip ? `${fmtIp(node.registered_ip)}:${node.registered_port}` : null);
+  setVal('blend-epochs', node.declared ? `${node.created ?? '—'} / ${node.active ?? '—'}` : null);
+  setVal('blend-reg-ip', node.registered_ip ? `${fmtIp(node.registered_ip)}:${node.registered_port}` : null);
+  setVal('blend-pub-ip', fmtIp(node.public_ip));
   const pubEl = document.getElementById('blend-pub-ip');
-  setVal(pubEl, fmtIp(node.public_ip));
   pubEl.classList.toggle('ok', node.ip_match === true);
   pubEl.classList.toggle('bad', node.ip_match === false);
 
@@ -726,89 +916,32 @@ function renderBlend(data) {
     warn.style.display = 'none';
   }
 
-  setVal(document.getElementById('blend-total'), net.core_nodes);
-  setVal(document.getElementById('blend-active'), `${net.active ?? '—'} / ${net.pending ?? '—'}`);
-  setVal(document.getElementById('blend-inactive'), `${net.inactive ?? '—'} / ${net.withdrawn ?? '—'}`);
-  setVal(document.getElementById('blend-hosts'), net.distinct_hosts);
-  setVal(document.getElementById('blend-epoch'), data.epoch);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Refresh logic
-// ─────────────────────────────────────────────────────────────
-async function refresh() {
-  const snap = await fetchLatest();
-  updateLatest(snap);
+  setVal('blend-total', net.core_nodes);
+  setVal('blend-active', `${net.active ?? '—'} / ${net.pending ?? '—'}`);
+  setVal('blend-inactive', `${net.inactive ?? '—'} / ${net.withdrawn ?? '—'}`);
+  setVal('blend-hosts', net.distinct_hosts);
+  setVal('blend-epoch', data.epoch);
 }
 
 // ─────────────────────────────────────────────────────────────
 // Init
 // ─────────────────────────────────────────────────────────────
 async function init() {
-  // Seed wallet chart with one dataset per known wallet
-  const walletNames = Object.keys(WALLETS);
-  const walletColors = ['#bc8cff', '#58a6ff', '#3fb950', '#d29922'];
-  charts.wallets = new Chart(document.getElementById('chart-wallets').getContext('2d'), {
-    type: 'line',
-    data: { labels: [], datasets: walletNames.map((name, i) => ({
-      label: name, data: [], borderColor: walletColors[i],
-      backgroundColor: walletColors[i] + '22', borderWidth: 1.5,
-      pointRadius: 0, tension: 0.2, fill: false,
-    })) },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
-      scales: {
-        x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
-        // Log scale: balances span many orders of magnitude (faucet-era 1e12
-        // vs PoW rewards ~1e8), which flattens the small ones on a linear axis.
-        y: {
-          type: 'logarithmic', grid: { color: '#30363d' },
-          ticks: {
-            color: '#8b949e',
-            callback: (v) => Number.isInteger(Math.log10(v))
-              ? Number(v).toLocaleString(undefined, { notation: 'compact' }) : '',
-          },
-        },
-      },
-    },
-  });
-
-  charts.tip = makeChart('chart-tip', 'Chain Tip', '#58a6ff');
-  charts.mempool = makeChart('chart-mempool', 'Pending Tx', '#d29922');
-  charts.peers = makeChart('chart-peers', 'Peers', '#bc8cff');
-  charts.temp = makeChart('chart-temp', 'CPU Temp', '#f85149');
-  charts.cpu = makeChart('chart-cpu', 'CPU %', '#3fb950');
-  // mem chart: two lines (mem % + load1)
-  charts.mem = new Chart(document.getElementById('chart-mem').getContext('2d'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'Mem %', data: [], borderColor: '#d29922', backgroundColor: '#d2992222', borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: true },
-      { label: 'Load (1m)', data: [], borderColor: '#58a6ff', backgroundColor: '#58a6ff22', borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false, yAxisID: 'y1' },
-    ] },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: true, labels: { color: '#8b949e' } } },
-      scales: {
-        x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', maxTicksLimit: 8, autoSkip: true } },
-        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' }, beginAtZero: true, position: 'left' },
-        y1: { grid: { display: false }, ticks: { color: '#8b949e' }, beginAtZero: true, position: 'right' },
-      },
-    },
-  });
-
-  // Load history first (default 1d), then start polling
-  await loadHistory('1d');
-  const snap = await fetchLatest();
-  updateLatest(snap);
-
-  if (!document.hidden) {
-    refreshInterval = setInterval(refresh, REFRESH_MS);
+  for (const kind of [...KINDS, 'host']) {
+    charts[kind] = (CHART_DEFS[kind] || []).map(makeChart).filter(Boolean);
   }
+
   setShowIps(showIps);
   document.getElementById('ip-toggle').addEventListener('click', () => setShowIps(!showIps));
-  refreshBlend();
-  setInterval(() => { if (!document.hidden) refreshBlend(); }, BLEND_REFRESH_MS);
+
+  // Load history first (default 1d), then start polling current values.
+  await loadHistory(selectedScale);
+  initVisibilityPolling(refresh, REFRESH_MS);
+
+  if (KINDS.includes('blockchain')) {
+    refreshBlend();
+    setInterval(() => { if (!document.hidden) refreshBlend(); }, BLEND_REFRESH_MS);
+  }
 
   // Wire up time scale selector buttons
   document.querySelectorAll('.timescale-btn[data-scale]').forEach(btn => {

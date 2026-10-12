@@ -27,7 +27,7 @@ def temp_db(tmp_path):
 def config_file(tmp_path):
     """Minimal config pointing at an unreachable URL."""
     cfg = tmp_path / "config.yaml"
-    cfg.write_text("node:\n  axum_url: http://localhost:39999\n")
+    cfg.write_text("blockchain:\n  axum_url: http://localhost:39999\n")
     return str(cfg)
 
 

@@ -2,18 +2,21 @@
 
 ## Objective
 
-**What:** A read-only web dashboard for Logos blockchain node operators showing node health, blockchain state, and wallet balances with historical graphs.
+**What:** A read-only web dashboard for Logos node operators showing the health and headline stats of the blockchain, storage and delivery nodes on one machine, plus the machine itself, with historical graphs.
 
-**Who:** Logos testnet node operators who currently use `curl` commands to monitor their nodes.
+**Who:** Logos testnet node operators who currently use `curl` and `logosctl` commands to monitor their nodes.
 
-**Success:** An operator can open the dashboard and understand the health of their node, the state of the blockchain from their node's view, and their wallet balances — without any `curl` commands.
+**Success:** An operator can open the dashboard and understand the health of each node they run on that machine — without any `curl` or `logosctl` commands — whichever subset of node kinds the machine runs.
+
+Terms used below (node kind, deployed, not answering, reading, snapshot, gap, counter) are defined in [CONTEXT.md](CONTEXT.md).
 
 **User flows:**
-1. Operator opens dashboard → sees live data refreshing every 5s
+1. Operator opens dashboard → sees current values refreshing every 30s
 2. Operator closes tab → collector stores 10-min snapshots
 3. Operator returns days later → sees historical graphs of all metrics
-4. Operator deploys to new node → config auto-detected from `user_config.yaml`
+4. Operator deploys to a new machine → declares which node kinds it runs; blockchain details auto-detected from `user_config.yaml`
 5. Operator selects a time scale (1d | 1w | 1m | Max) → historical charts re-fetch and re-render for that window
+6. A node stops → its chip turns red with the time it was last seen; its last known values stay; its charts show a gap
 
 ## Tech Stack
 
@@ -102,19 +105,30 @@ def fetch_cryptarchia_info(base_url: str) -> dict:
 
 **YAML config:**
 ```yaml
-# Auto-detect wallets + API URL from node config
-node_config_path: "~/.config/logos-node/user_config.yaml"
-
-# Or manual override
-node:
+# A kind is deployed only if its block is present.
+blockchain:
+  # Auto-detect wallets + API URL from node config
+  node_config_path: "~/.config/logos-node/user_config.yaml"
+  # Or manual override
   axum_url: "http://localhost:38437"
+  wallets:
+    - name: "voucher"
+      address: "e59ffc735020e875982dcf84906738224aae576ea9119714a6d1d44de96f6d16"
 
-wallets:
-  - name: "voucher"
-    address: "e59ffc735020e875982dcf84906738224aae576ea9119714a6d1d44de96f6d16"
+storage:
+  module: storage_module
+delivery:
+  module: delivery_module
+
+logosctl:
+  command: ["logosctl"]
 ```
 
-**SQLite schema:**
+**SQLite schema:** one table per node kind and one for the host, each with a
+unique 10-min `timestamp`. `snapshots` is the blockchain table, shown below;
+`storage_snapshots`, `delivery_snapshots` and `host_snapshots` are defined in
+`collector/db.py` (`KIND_TABLES`). The host columns of `snapshots` are no longer
+written but stay readable as host history.
 ```sql
 CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,23 +158,65 @@ CREATE INDEX idx_snapshots_timestamp ON snapshots(timestamp);
 **Timestamps in database:** Always UTC Unix epoch integers.
 **Timestamps in dashboard:** Always rendered in the browser's local timezone.
 
+## Node Kinds
+
+A machine runs zero or one node of each kind: `blockchain`, `storage`, `delivery`.
+
+**Deployed means configured.** A kind is deployed if and only if its block is present in the config (`enabled: false` inside the block opts out). Nothing is probed. A kind that is not deployed is not polled, has no section or chip on the page, and produces no error. With no kind deployed, the collector still records host metrics and the page shows the host only.
+
+**Kinds are independent.** Each kind is read and stored on its own; one failing never skips another. Host metrics are recorded every interval regardless of any node.
+
+**How each kind is read:**
+
+| Kind | Interface | Up when |
+|------|-----------|---------|
+| blockchain | its REST API (`/cryptarchia/info`, `/network/info`, `/mantle/metrics`, wallet balances) | `/cryptarchia/info` answers |
+| storage | `logosctl` (`status`, `stats`, and `isRunning`, `network`, `debug`, `space`, `manifests`, `collectMetrics` on the module) | daemon reachable, module `loaded`, `isRunning` true |
+| delivery | `logosctl` (`status`, `stats`, and `getNodeInfo IsRunning`, `getConnectionStatus`, `rlnState`, `collectOpenMetricsText` on the module) | daemon reachable, module `loaded`, node running |
+
+A delivery node that is running but `Disconnected`, or whose rate limiting (RLN) failed, is up: those are states the page shows, not failures of the node.
+
+**logosctl:** invoked as a process with a configurable argv prefix (`logosctl.command`), always with `--json`. Only the read-only calls above are made, and no browser input reaches the command line.
+
+**Counters:** values that restart from zero with the node are stored as-is in `*_total` columns. Charts show their growth per interval; a decrease (a restart) or a missing snapshot on either side is a gap.
+
 ## Config Loading
 
-**Auto-detect from `user_config.yaml`:**
-1. Read `node_config_path` from `config.yaml` (default: `~/.config/logos-node/user_config.yaml`)
+**Legacy keys:** top-level `node_config_path`, `node`, `wallets` and `blend` (from before kinds were explicit) raise a `ConfigError` at startup naming where each key moved under `blockchain:`.
+
+**Blockchain auto-detect from `user_config.yaml`:**
+1. Read `blockchain.node_config_path` from `config.yaml` (default: `~/.config/logos-node/user_config.yaml`)
 2. Parse `api.backend.listen_address` → extract port → set `axum_url`
 3. Parse `wallet.known_keys` → extract all public key addresses → populate wallet list
-4. If `wallet` section exists in `config.yaml`, merge and override (allows renaming, filtering)
-5. If `wallets` is empty after auto-parse, log a warning and continue with empty list
+4. If `blockchain.wallets` exists in `config.yaml`, it replaces the auto-detected list
+5. If `wallets` is empty after auto-parse, continue with an empty list
 
-**Missing `user_config.yaml`:** If the file doesn't exist and no manual `node.axum_url` is set in `config.yaml`, the collector raises a `ConfigError` on startup with a clear message:
-```
-Error: No API URL configured. Set node_config_path in config.yaml or specify node.axum_url manually.
-```
+**Missing `user_config.yaml`:** If a `blockchain:` block is present but the file doesn't exist and no `blockchain.axum_url` is set, the collector raises a `ConfigError` on startup. To run without a blockchain node, remove the block.
+
+**Config file:** `config.local.yaml` (untracked, per machine) is preferred over `config.yaml` by both the collector and the dashboard.
 
 **Wallet validation:** If a wallet address in the config is not a valid base58 string, log a warning and skip that wallet.
 
+## Current Values
+
+The page's non-chart values come from `GET /api/live`, which returns one state per deployed kind (`status`: `pending` | `up` | `down`, `last_ok_at`, `error`, `data`) plus host metrics.
+
+- The dashboard keeps one cached reading per kind. A request never reads a node itself: it returns the cache and, if the cache is older than `dashboard.refresh_seconds` (default 30), starts one background refresh. With no browser asking, no node is read.
+- The page polls every refresh period while the tab is visible, for every kind including blockchain.
+- **Node not answering:** `status` becomes `down`, `error` says why, and `data` keeps the last known values — from memory, or from the newest stored snapshot if the dashboard has not seen the node up since it started. The chip turns red and shows when the node was last seen.
+
 ## Failure Modes
+
+**A storage or delivery node cannot be read** (daemon unreachable, `logosctl` missing or timing out, module crashed or not loaded, node not running):
+- Logged with the reason
+- No snapshot is written for that kind for this interval (a gap in its charts)
+- Other kinds and the host are unaffected
+
+**A single `logosctl` call fails while the node is up:**
+- Logged; the values that call provides are stored as `null`
+- The rest of the reading is stored
+
+The cases below are for the blockchain node.
 
 **Single API endpoint fails:**
 - Log error with URL and HTTP status or exception message
@@ -200,22 +256,31 @@ Error: No API URL configured. Set node_config_path in config.yaml or specify nod
 
 ## Chart Types
 
-All time-series data rendered as **line charts** using Chart.js. One chart per metric:
+All time-series data rendered as **line charts** using Chart.js. Snapshots more than 2.5 intervals apart have a gap drawn between them.
 
-| Metric | Y-axis | X-axis |
-|--------|--------|--------|
-| Chain tip height | Block height | Time |
-| LIB height | Block height | Time |
-| Mempool depth | Tx count | Time |
-| Peer count | Peer count | Time |
-| Block producer | Count per leader | Time (stacked bar) |
-| Wallet balances | Native token units | Time |
+| Kind | Chart | Y-axis |
+|------|-------|--------|
+| blockchain | Chain tip height | Block height |
+| blockchain | Mempool depth | Tx count |
+| blockchain | Peer count | Peer count |
+| blockchain | Wallet balances | Native token units (log scale) |
+| storage | Quota used | Bytes |
+| storage | Blocks & files stored | Count |
+| storage | Blocks served to peers | Blocks per interval |
+| storage | Connected peers | Peer count |
+| storage | Memory | MB |
+| delivery | Peers | Peer count |
+| delivery | Bytes in / out | Bytes per interval |
+| delivery | Messages in / out | Messages per interval |
+| delivery | Connection status | Connected / not connected |
+| delivery | Memory | MB |
+| host | CPU temperature, CPU usage, memory & load | °C, %, % |
 
 ### Time Scale Selector
 
 **Feature:** Time Scale Selector
 
-The user selects a time window for the historical charts. The live panel (5-second refresh) is completely independent and always shows the latest node data regardless of the selected window.
+The user selects a time window for the historical charts. The current values (30-second refresh) are completely independent and always shows the latest node data regardless of the selected window.
 
 **Options:**
 
@@ -234,10 +299,10 @@ The user selects a time window for the historical charts. The live panel (5-seco
 - **Active state:** The selected button has a distinct visual style (e.g., accent background or border) to indicate the current selection.
 - **On selection change:**
   1. Clear all historical chart data (reset datasets to empty arrays).
-  2. Issue `GET /api/snapshots?hours=N` where N is the numeric value from the table above.
+  2. Issue `GET /api/snapshots?hours=N` (blockchain) and `GET /api/history/<kind>?hours=N` (storage, delivery, host) where N is the numeric value from the table above.
   3. Re-populate charts with the returned snapshots.
 - **Max (`hours=0`):** The API returns all snapshots regardless of age (up to the 90-day retention limit). The `since` parameter is set to `0` to disable the time filter server-side.
-- **Live panel unaffected:** The 5-second polling loop that fetches from the node APIs (via `/api/proxy/*`) runs independently of the time scale selection. Changing the time scale does not restart or alter that polling loop.
+- **Current values unaffected:** The polling loop that fetches `/api/live` runs independently of the time scale selection. Changing the time scale does not restart or alter that polling loop.
 - **Initial load:** On page load, the default `1d` window is fetched before charts are populated.
 
 ## Testing Strategy
@@ -260,7 +325,10 @@ The user selects a time window for the historical charts. The live panel (5-seco
 ## Boundaries
 
 **Always:**
-- Parse `user_config.yaml` automatically if present
+- Treat a kind as deployed only when its config block is present; never probe for nodes
+- Read and store each kind independently of the others, and the host independently of all nodes
+- Show a node that is not answering as such, with its last known values; chart its absence as a gap, never as zero
+- Parse the blockchain node's `user_config.yaml` automatically if present
 - Log API errors with URL and response code
 - Graceful degradation if any API endpoint fails (show last known value)
 - Store timestamps as Unix epoch integers in SQLite (UTC)
@@ -278,6 +346,7 @@ The user selects a time window for the historical charts. The live panel (5-seco
 - Switching chart library
 
 **Never:**
+- Call a `logosctl` method that changes a node, or pass browser input to `logosctl`
 - Write to the blockchain or submit transactions
 - Hard-code wallet addresses
 - Expose private keys or signing keys
@@ -291,7 +360,12 @@ The user selects a time window for the historical charts. The live panel (5-seco
 - [ ] `python -m collector run --daemon` survives restart; duplicate 10-min windows use `INSERT OR REPLACE`
 - [ ] `python -m dashboard` serves dashboard on port 8282
 - [ ] Dashboard shows: chain tip, LIB, epoch, mempool depth, peer count, wallet balances, block producer
-- [ ] Dashboard auto-refreshes every 5s when tab is visible, stops when hidden
+- [ ] Dashboard auto-refreshes every 30s when tab is visible, stops when hidden
+- [ ] With only `storage:` and `delivery:` configured, the page has no blockchain section and the collector makes no blockchain request
+- [ ] With no kind configured, the collector records host metrics and the page shows the host only
+- [ ] Storage and delivery current values and history match what `logosctl` reports
+- [ ] Stopping one node turns its chip red, keeps its last known values, leaves a gap in its charts, and changes nothing for the other kinds
+- [ ] Pre-`blockchain:` top-level config keys stop startup with a message naming their new place
 - [ ] Config auto-detects API URL from `api.backend.listen_address` in `user_config.yaml`
 - [ ] Config auto-detects wallet addresses from `wallet.known_keys` in `user_config.yaml`
 - [ ] Collector logs errors without crashing when an API is temporarily unavailable
