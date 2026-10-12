@@ -51,6 +51,10 @@ class Logosctl:
         if isinstance(data, dict) and data.get("status") == "error":
             raise LogosctlError(data.get("code") or "ERROR", data.get("message") or "")
         if proc.returncode != 0:
+            # `status` reports an unreachable daemon in its normal shape, with a reason.
+            daemon = data.get("daemon") if isinstance(data, dict) else None
+            if isinstance(daemon, dict) and daemon.get("reason"):
+                raise LogosctlError("DAEMON_UNREACHABLE", str(daemon["reason"]))
             raise LogosctlError("ERROR", f"exit {proc.returncode}: {text[:200]}")
         return data
 

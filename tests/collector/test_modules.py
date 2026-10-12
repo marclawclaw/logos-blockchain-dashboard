@@ -206,6 +206,21 @@ def test_daemon_down_marks_every_module_kind_down():
         assert "NO_DAEMON" in reading.error
 
 
+def test_status_reason_is_reported_when_the_daemon_refuses_the_client():
+    """`logosctl status` exits 1 with its usual shape and a reason (e.g. no token)."""
+    from collector.modules import read_modules
+
+    def refused(argv, **kwargs):
+        payload = {"daemon": {"reason": "No authentication token.", "status": "not_running"}}
+        return subprocess.CompletedProcess(argv, 1, stdout=json.dumps(payload), stderr="")
+
+    with patch("collector.logosctl.subprocess.run", side_effect=refused):
+        readings = read_modules(_config())
+    assert not readings["storage"].ok
+    assert readings["storage"].error == (
+        "Logos Core daemon unreachable (DAEMON_UNREACHABLE: No authentication token.)")
+
+
 def test_logosctl_not_installed():
     from collector.modules import read_modules
     with patch("collector.logosctl.subprocess.run", side_effect=FileNotFoundError("logosctl")):
