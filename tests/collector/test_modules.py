@@ -118,8 +118,9 @@ class FakeLogosctl:
         return subprocess.CompletedProcess(argv, code, stdout=json.dumps(payload), stderr="")
 
 
-def _config(storage=True, delivery=True, command=None):
+def _config(storage=True, delivery=True, command=None, blend=False):
     return Config(
+        blend=ModuleConfig("blockchain_module") if blend else None,
         storage=ModuleConfig("storage_module") if storage else None,
         delivery=ModuleConfig("delivery_module") if delivery else None,
         logosctl=LogosctlConfig(command=command or ["logosctl"]),
@@ -414,3 +415,116 @@ def test_prune_covers_every_table(tmp_path):
     assert prune_old_snapshots(db_path, retention_days=90) == 3
     for kind in ("storage", "delivery", "host"):
         assert len(get_kind_snapshots_since(db_path, kind, 0)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Blend traffic (blockchain node metrics)
+# ---------------------------------------------------------------------------
+
+# Shape of blockchain_module 0.3.2's collectOpenMetricsText: the OpenTelemetry
+# exporter adds a second `_total` and an `otel_scope_name` label. The method
+# returns the text bare, not in a {success, value} envelope.
+BLEND_OPENMETRICS = """\
+# TYPE blend_core_blacklist_size gauge
+blend_core_blacklist_size{otel_scope_name="logos-blockchain-node"} 1
+# TYPE blend_core_peers_negotiated gauge
+blend_core_peers_negotiated{otel_scope_name="logos-blockchain-node"} 3
+# TYPE blend_messages_received_total_total counter
+blend_messages_received_total_total{otel_scope_name="logos-blockchain-node"} 2344
+# TYPE blend_messages_sent_total_total counter
+blend_messages_sent_total_total{action="forward",otel_scope_name="logos-blockchain-node"} 1459
+blend_messages_sent_total_total{action="publish",otel_scope_name="logos-blockchain-node"} 1464
+# TYPE blend_outbound_messages_failed_total_total counter
+blend_outbound_messages_failed_total_total{action="publish",otel_scope_name="logos-blockchain-node"} 217
+# TYPE blend_payloads_bypassed_total_total counter
+blend_payloads_bypassed_total_total{payload_type="block_proposal",otel_scope_name="logos-blockchain-node"} 18
+# TYPE consensus_tip_height gauge
+consensus_tip_height{otel_scope_name="logos-blockchain-node"} 22635
+"""
+
+BLEND_STATUS = {
+    **STATUS,
+    "modules": [*STATUS["modules"],
+                {"name": "blockchain_module", "status": "loaded", "uptime_seconds": 43200,
+                 "version": "0.3.2"}],
+}
+BLEND_STATS = [*STATS, {"cpu_percent": 0.0, "cpu_time_seconds": 2958.32, "memory_mb": 1865.37,
+                        "name": "blockchain_module"}]
+
+
+def _blend_fake(text=BLEND_OPENMETRICS):
+    calls = dict(CALLS)
+    if text is not None:
+        calls[("blockchain_module", "collectOpenMetricsText")] = text
+    return FakeLogosctl(status=BLEND_STATUS, stats=BLEND_STATS, calls=calls)
+
+
+def test_blend_reading():
+    reading = _read(_blend_fake(), storage=False, delivery=False, blend=True)["blend"]
+    assert reading.ok and reading.error is None
+    assert reading.data == {
+        "module_status": "loaded", "module_version": "0.3.2", "uptime_seconds": 43200,
+        "memory_mb": 1865.37, "cpu_seconds": 2958.32, "running": 1,
+        "core_peers": 3, "blacklist_size": 1,
+        "messages_forwarded_total": 1459, "messages_published_total": 1464,
+        "messages_received_total": 2344,
+        "mix_packets_processed_total": 0,   # never incremented: absent from the metrics
+        "publish_failed_total": 217, "forward_failed_total": 0,
+        "inbound_failed_total": 0, "inbound_dropped_total": 0,
+        "peers_blocked_total": 0, "payloads_bypassed_total": 18,
+    }
+
+
+def test_blend_counters_accept_the_single_total_spelling():
+    text = BLEND_OPENMETRICS.replace("_total_total", "_total")
+    reading = _read(_blend_fake(text), storage=False, delivery=False, blend=True)["blend"]
+    assert reading.data["messages_forwarded_total"] == 1459
+    assert reading.data["messages_received_total"] == 2344
+
+
+def test_blend_with_node_metrics_off_is_down_with_the_fix_in_the_error():
+    # With enable_open_metrics: false the method fails; the reading says how to turn it on.
+    reading = _read(_blend_fake(text=None), storage=False, delivery=False, blend=True)["blend"]
+    assert not reading.ok
+    assert "enable_open_metrics" in reading.error
+    assert reading.data["module_status"] == "loaded"
+
+
+def _load_config(tmp_path, body):
+    from collector.config import load
+    path = tmp_path / "config.yaml"
+    path.write_text(body)
+    return load(str(path))
+
+
+def test_blend_kind_follows_the_blockchain_kind(tmp_path):
+    cfg = _load_config(tmp_path, "blockchain:\n  axum_url: http://127.0.0.1:8080\n")
+    assert cfg.kinds == ["blockchain", "blend"]
+    assert cfg.blend.module == "blockchain_module"
+
+    cfg = _load_config(tmp_path, "storage:\n")
+    assert cfg.blend is None and cfg.kinds == ["storage"]
+
+
+def test_blend_kind_can_be_turned_off_and_its_module_renamed(tmp_path):
+    cfg = _load_config(
+        tmp_path, "blockchain:\n  axum_url: http://127.0.0.1:8080\n  blend_metrics: false\n")
+    assert cfg.kinds == ["blockchain"]
+
+    cfg = _load_config(
+        tmp_path, "blockchain:\n  axum_url: http://127.0.0.1:8080\n  module: my_chain\n")
+    assert cfg.blend.module == "my_chain"
+
+
+def test_blend_table_is_created_and_pruned(tmp_path):
+    from collector.db import (
+        get_kind_snapshots_since, init_db, prune_old_snapshots, write_kind_snapshot,
+    )
+    db_path = str(tmp_path / "test.db")
+    init_db(db_path)
+    now = (int(time.time()) // 600) * 600
+    write_kind_snapshot(db_path, "blend", now, {"messages_forwarded_total": 5, "core_peers": 2})
+    write_kind_snapshot(db_path, "blend", now - 91 * 24 * 3600, {})
+    assert prune_old_snapshots(db_path, retention_days=90) == 1
+    rows = get_kind_snapshots_since(db_path, "blend", 0)
+    assert [(r["messages_forwarded_total"], r["core_peers"]) for r in rows] == [(5, 2)]

@@ -196,7 +196,7 @@
   </style>
 </head>
 <body>
-{% set kind_names = {'blockchain': 'Blockchain', 'storage': 'Storage', 'delivery': 'Delivery'} %}
+{% set kind_names = {'blockchain': 'Blockchain', 'blend': 'Blend traffic', 'storage': 'Storage', 'delivery': 'Delivery'} %}
 {% set wallet_notes = {
   'stake': 'Stake key, genesis stake',
   'voucher': 'VoucherMaster',
@@ -300,6 +300,39 @@
     <div class="chart-wrap"><canvas id="chart-wallets"></canvas></div>
   </div>
   {% endif %}
+</div>
+{% endif %}
+
+{% if 'blend' in kinds %}
+<div class="kind-section" id="section-blend">
+  <div class="section-title">Blend traffic</div>
+
+  <div class="card">
+    <div class="card-title">Blend — Since node start</div>
+    <div class="metric"><span class="metric-label">Forwarded for others</span><span class="metric-value" id="blend-forwarded">—</span></div>
+    <div class="metric"><span class="metric-label">Received</span><span class="metric-value" id="blend-received">—</span></div>
+    <div class="metric"><span class="metric-label">Mix packets processed</span><span class="metric-value" id="blend-processed">—</span></div>
+    <div class="metric"><span class="metric-label">Published (own)</span><span class="metric-value" id="blend-published">—</span></div>
+    <div class="metric"><span class="metric-label">Node uptime</span><span class="metric-value" id="blend-uptime">—</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Blend — Health</div>
+    <div class="metric"><span class="metric-label">Core peers connected</span><span class="metric-value" id="blend-core-peers">—</span></div>
+    <div class="metric"><span class="metric-label">Send failures</span><span class="metric-value" id="blend-send-failed">—</span></div>
+    <div class="metric"><span class="metric-label">Sent unblended (deadline missed)</span><span class="metric-value" id="blend-bypassed">—</span></div>
+    <div class="metric"><span class="metric-label">Inbound failed / dropped</span><span class="metric-value" id="blend-inbound-bad">—</span></div>
+    <div class="metric"><span class="metric-label">Peers blocked / blacklisted now</span><span class="metric-value" id="blend-blocked">—</span></div>
+  </div>
+
+  <div class="card chart-card">
+    <div class="card-title">Blend — Messages (per interval)</div>
+    <div class="chart-wrap"><canvas id="chart-blend-messages"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="card-title">Blend — Core Peers</div>
+    <div class="chart-wrap"><canvas id="chart-blend-peers"></canvas></div>
+  </div>
 </div>
 {% endif %}
 
@@ -532,6 +565,14 @@ const CHART_DEFS = {
     { id: 'chart-wallets', log: true, noFill: true,
       series: WALLET_NAMES.map((name) => ({ label: name, value: walletValue(name) })) },
   ],
+  blend: [
+    { id: 'chart-blend-messages', noFill: true, series: [
+      { label: 'Forwarded', value: delta('messages_forwarded_total'), live: false, color: '#3fb950' },
+      { label: 'Received', value: delta('messages_received_total'), live: false, color: '#58a6ff' },
+      { label: 'Published', value: delta('messages_published_total'), live: false, color: '#d29922' },
+    ] },
+    { id: 'chart-blend-peers', series: [{ label: 'Core peers', value: field('core_peers'), color: '#bc8cff' }] },
+  ],
   storage: [
     { id: 'chart-storage-quota', yFormat: fmtBytes,
       series: [{ label: 'Quota used', value: field('quota_used_bytes') }] },
@@ -737,6 +778,25 @@ const RENDERERS = {
       const v = balances[el.dataset.wallet];
       el.textContent = v != null ? Number(v).toLocaleString() : '—';
     });
+  },
+
+  blend(d) {
+    setVal('blend-forwarded', num(d.messages_forwarded_total));
+    setVal('blend-received', num(d.messages_received_total));
+    setVal('blend-processed', num(d.mix_packets_processed_total));
+    setVal('blend-published', num(d.messages_published_total));
+    setVal('blend-uptime', fmtDuration(d.uptime_seconds));
+    setVal('blend-core-peers', num(d.core_peers));
+    const peers = document.getElementById('blend-core-peers');
+    peers.classList.toggle('bad', d.core_peers === 0);
+    const failed = d.publish_failed_total == null && d.forward_failed_total == null ? null
+      : (d.publish_failed_total || 0) + (d.forward_failed_total || 0);
+    setVal('blend-send-failed', num(failed));
+    setVal('blend-bypassed', num(d.payloads_bypassed_total));
+    setVal('blend-inbound-bad', d.inbound_failed_total == null ? null
+      : `${num(d.inbound_failed_total)} / ${num(d.inbound_dropped_total)}`);
+    setVal('blend-blocked', d.peers_blocked_total == null ? null
+      : `${num(d.peers_blocked_total)} / ${num(d.blacklist_size)}`);
   },
 
   storage(d) {

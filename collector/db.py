@@ -82,6 +82,21 @@ KIND_TABLES: dict[str, tuple[str, dict[str, str]]] = {
         "messages_in_total": "INTEGER",
         "messages_out_total": "INTEGER",
     }),
+    "blend": ("blend_snapshots", {
+        **_MODULE_COLUMNS,
+        "core_peers": "INTEGER",                     # core peers negotiated right now
+        "blacklist_size": "INTEGER",
+        "messages_forwarded_total": "INTEGER",       # relayed on behalf of other nodes
+        "messages_published_total": "INTEGER",       # this node's own messages
+        "messages_received_total": "INTEGER",
+        "mix_packets_processed_total": "INTEGER",    # layers peeled off for the next hop
+        "publish_failed_total": "INTEGER",
+        "forward_failed_total": "INTEGER",
+        "inbound_failed_total": "INTEGER",
+        "inbound_dropped_total": "INTEGER",
+        "peers_blocked_total": "INTEGER",
+        "payloads_bypassed_total": "INTEGER",        # sent in the clear: Blend missed the deadline
+    }),
     "host": ("host_snapshots", dict(HOST_COLUMNS)),
 }
 
