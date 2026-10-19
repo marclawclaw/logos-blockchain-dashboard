@@ -38,8 +38,9 @@ def _logos_loader():
 
 _yaml_loader = _logos_loader()
 
-# Node kinds, in the order the dashboard shows them.
-KINDS = ("blockchain", "storage", "delivery")
+# Node kinds, in the order the dashboard shows them. `blend` is the Blend
+# traffic of the blockchain node, read from its metrics through logosctl.
+KINDS = ("blockchain", "blend", "storage", "delivery")
 
 # Top-level keys from before node kinds were explicit; they now live under `blockchain:`.
 _LEGACY_KEYS = {
@@ -88,6 +89,9 @@ class LogosctlConfig:
 @dataclass
 class Config:
     blockchain: Optional[BlockchainConfig] = None
+    # Blend traffic counters of the blockchain node (its module's OpenMetrics).
+    # On whenever the blockchain kind is, unless `blockchain.blend_metrics: false`.
+    blend: Optional[ModuleConfig] = None
     storage: Optional[ModuleConfig] = None
     delivery: Optional[ModuleConfig] = None
     logosctl: LogosctlConfig = field(default_factory=LogosctlConfig)
@@ -230,8 +234,14 @@ def load(config_path: Optional[str] = None) -> Config:
     storage_block = _kind_block(raw, "storage")
     delivery_block = _kind_block(raw, "delivery")
 
+    blend_on = blockchain_block is not None and blockchain_block.get("blend_metrics", True) is not False
+
     return Config(
         blockchain=_load_blockchain(blockchain_block) if blockchain_block is not None else None,
+        blend=(
+            ModuleConfig(module=blockchain_block.get("module", "blockchain_module"))
+            if blend_on else None
+        ),
         storage=(
             ModuleConfig(module=storage_block.get("module", "storage_module"))
             if storage_block is not None else None

@@ -52,7 +52,8 @@ def test_config_loads_defaults(tmp_path):
     cfg = load(str(config_yaml))
     assert cfg.blockchain.axum_url == "http://localhost:38437"
     assert cfg.interval_minutes == 5
-    assert cfg.kinds == ["blockchain"]
+    # The blockchain node's Blend traffic comes with it (blockchain.blend_metrics).
+    assert cfg.kinds == ["blockchain", "blend"]
 
 
 def test_config_auto_detect_from_user_config(tmp_path):

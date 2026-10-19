@@ -1,4 +1,5 @@
-"""Readings for nodes that run as Logos Core modules: storage and delivery.
+"""Readings for nodes that run as Logos Core modules: storage, delivery, and
+the Blend traffic of the blockchain node.
 
 A reading is a flat dict whose keys match the columns of that kind's snapshot
 table (see db.py). A value that could not be read is None, so one failing call
@@ -17,7 +18,7 @@ from .logosctl import Logosctl, LogosctlError
 
 logger = logging.getLogger(__name__)
 
-MODULE_KINDS = ("storage", "delivery")
+MODULE_KINDS = ("blend", "storage", "delivery")
 
 
 @dataclass
@@ -182,7 +183,53 @@ def _read_delivery(ctl: Logosctl, module: str, data: dict) -> Reading:
     return Reading(True, data)
 
 
-_READERS = {"storage": _read_storage, "delivery": _read_delivery}
+# ---------------------------------------------------------------------------
+# Blend traffic (blockchain node)
+# ---------------------------------------------------------------------------
+
+BLEND_METRICS_OFF = (
+    "node metrics are off: set tracing.metrics.enable_open_metrics: true "
+    "in the node's user_config.yaml and restart it"
+)
+
+
+def _blend_counter(samples, name: str, **labels: str) -> int:
+    """A Blend counter. The node's OpenTelemetry exporter appends a second
+    `_total` to names that already end in one (blockchain_module 0.3.2), so
+    accept both spellings."""
+    value = metric_sum(samples, f"{name}_total", None, **labels)
+    if value is None:
+        value = metric_sum(samples, name, None, **labels)
+    return value or 0
+
+
+def _read_blend(ctl: Logosctl, module: str, data: dict) -> Reading:
+    text = _try(ctl, module, "collectOpenMetricsText")
+    if not isinstance(text, str) or not text:
+        return Reading(False, data, BLEND_METRICS_OFF)
+    samples = parse_openmetrics(text)
+    data["running"] = 1
+    data["core_peers"] = metric_sum(samples, "blend_core_peers_negotiated")
+    data["blacklist_size"] = metric_sum(samples, "blend_core_blacklist_size")
+    data["messages_forwarded_total"] = _blend_counter(
+        samples, "blend_messages_sent_total", action="forward")
+    data["messages_published_total"] = _blend_counter(
+        samples, "blend_messages_sent_total", action="publish")
+    data["messages_received_total"] = _blend_counter(samples, "blend_messages_received_total")
+    data["mix_packets_processed_total"] = _blend_counter(
+        samples, "blend_mix_packets_processed_total")
+    data["publish_failed_total"] = _blend_counter(
+        samples, "blend_outbound_messages_failed_total", action="publish")
+    data["forward_failed_total"] = _blend_counter(
+        samples, "blend_outbound_messages_failed_total", action="forward")
+    data["inbound_failed_total"] = _blend_counter(samples, "blend_inbound_messages_failed_total")
+    data["inbound_dropped_total"] = _blend_counter(samples, "blend_inbound_messages_dropped_total")
+    data["peers_blocked_total"] = _blend_counter(samples, "blend_core_peers_blocked_total")
+    data["payloads_bypassed_total"] = _blend_counter(samples, "blend_payloads_bypassed_total")
+    return Reading(True, data)
+
+
+_READERS = {"blend": _read_blend, "storage": _read_storage, "delivery": _read_delivery}
 
 
 # ---------------------------------------------------------------------------
